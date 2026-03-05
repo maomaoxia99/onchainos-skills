@@ -62,7 +62,7 @@ Works with Claude Code, Cursor, Codex CLI, and OpenCode. Auto-detects your envir
 
 Tell Codex:
 
-```
+```plain
 Fetch and follow instructions from https://raw.githubusercontent.com/okx/onchainos-skills/refs/heads/main/.codex/INSTALL.md
 ```
 
@@ -70,7 +70,7 @@ Fetch and follow instructions from https://raw.githubusercontent.com/okx/onchain
 
 Tell OpenCode:
 
-```
+```plain
 Fetch and follow instructions from https://raw.githubusercontent.com/okx/onchainos-skills/refs/heads/main/.opencode/INSTALL.md
 ```
 
