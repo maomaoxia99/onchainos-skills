@@ -7,7 +7,7 @@ onchainos skills for AI coding assistants. Provides token search, market data, w
 | Skill | Description |
 |-------|-------------|
 | `okx-wallet-portfolio` | Wallet balance, token holdings, portfolio value |
-| `okx-dex-market` | Real-time prices, K-line charts, trade history, index prices |
+| `okx-dex-market` | Real-time prices, K-line charts, trade history, index prices, smart money signals, meme pump scanning |
 | `okx-dex-swap` | Token swap via DEX aggregation (500+ liquidity sources) |
 | `okx-dex-token` | Token search, metadata, market cap, rankings, holder analysis |
 | `okx-onchain-gateway` | Gas estimation, transaction simulation, broadcasting, order tracking |
@@ -89,6 +89,16 @@ The skills work together in typical DeFi flows:
 **Pre-flight Check**: `okx-onchain-gateway` (estimate gas) -> `okx-onchain-gateway` (simulate tx) -> `okx-onchain-gateway` (broadcast) -> `okx-onchain-gateway` (track order)
 
 **Full Trading Flow**: `okx-dex-token` (search) -> `okx-dex-market` (price/chart) -> `okx-wallet-portfolio` (check balance) -> `okx-dex-swap` (get tx) -> `okx-onchain-gateway` (simulate + broadcast + track)
+
+## Install CLI
+
+### Shell Script (macOS / Linux)
+
+Auto-detects your platform, downloads the matching binary, verifies SHA256 checksum, and installs to `~/.local/bin`:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/okx/onchainos-skills/main/install.sh | sh
+```
 
 ## API Key Security Notice & Disclaimer
 

@@ -1,10 +1,10 @@
 ---
 name: okx-dex-token
-description: "This skill should be used when the user asks to 'find a token', 'search for a token', 'look up PEPE', 'what\\'s trending', 'top tokens', 'trending tokens on Solana', 'token rankings', 'who holds this token', 'holder distribution', 'is this token safe', 'token market cap', 'token liquidity', 'research a token', 'tell me about this token', 'token info', or mentions searching for tokens by name or address, discovering trending tokens, viewing token rankings, checking holder distribution, or analyzing token market cap and liquidity. Covers token search, metadata, market cap, liquidity, volume, trending token rankings, and holder analysis across XLayer, Solana, Ethereum, Base, BSC, Arbitrum, Polygon, and 20+ other chains. Do NOT use when the user says only a single generic word like 'tokens' or 'crypto' without specifying a token name, action, or question. For simple current price checks, price charts, candlestick data, or trade history, use okx-dex-market instead."
+description: "This skill should be used when the user asks to 'find a token', 'search for a token', 'look up PEPE', 'what\\'s trending', 'top tokens', 'trending tokens on Solana', 'token rankings', 'who holds this token', 'holder distribution', 'token market cap', 'token liquidity', 'research a token', 'tell me about this token', 'token info', or mentions searching for tokens by name or address, discovering trending tokens, viewing token rankings, checking holder distribution, or analyzing token market cap and liquidity. Covers token search, metadata, market cap, liquidity, volume, trending token rankings, and holder analysis across XLayer, Solana, Ethereum, Base, BSC, Arbitrum, Polygon, and 20+ other chains. Do NOT use when the user says only a single generic word like 'tokens' or 'crypto' without specifying a token name, action, or question. For simple current price checks, price charts, candlestick data, or trade history, use okx-dex-market instead. For meme token safety analysis, developer reputation, rug pull checks, bundle/sniper detection, or finding tokens by same creator, use okx-dex-market instead."
 license: Apache-2.0
 metadata:
   author: okx
-  version: "1.0.0"
+  version: "1.0.1"
   homepage: "https://web3.okx.com"
 ---
 
@@ -12,24 +12,33 @@ metadata:
 
 5 commands for token search, metadata, detailed pricing, rankings, and holder distribution.
 
-## Prerequisites
+## Pre-flight Checks
 
-Before using this skill, ensure the `onchainos` CLI is installed:
+Every time before running any `onchainos` command, always follow these steps in order. Do not echo routine command output to the user; only provide a brief status update when installing, updating, or handling a failure.
 
-1. Check if `onchainos` is already available:
-   ```bash
-   which onchainos
-   ```
-2. If not found, install it:
+1. **Confirm installed**: Run `which onchainos`. If not found, install it:
    ```bash
    curl -sSL https://raw.githubusercontent.com/okx/onchainos-skills/main/install.sh | sh
    ```
-3. Verify installation:
+   If the install script fails, ask the user to install manually following the instructions at: https://github.com/okx/onchainos-skills
+
+2. **Check for updates**: Read `~/.onchainos/last_check` and compare it with the current timestamp:
    ```bash
-   onchainos --version
+   cached_ts=$(cat ~/.onchainos/last_check 2>/dev/null || true)
+   now=$(date +%s)
    ```
-4. If the install script fails, ask the user to install manually following the instructions at: https://github.com/okx/onchainos-skills
-5. Create a `.env` file in the project root to override the default API credentials (optional — skip this for quick start):
+   - If `cached_ts` is non-empty and `(now - cached_ts) < 43200` (12 hours), skip the update and proceed.
+   - Otherwise (file missing or older than 12 hours), run the installer to check for updates:
+     ```bash
+     curl -sSL https://raw.githubusercontent.com/okx/onchainos-skills/main/install.sh | sh
+     ```
+     If a newer version is installed, tell the user and suggest updating their onchainos skills from https://github.com/okx/onchainos-skills to get the latest features.
+3. If any `onchainos` command fails with an unexpected error during this
+   session, try reinstalling before giving up:
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/okx/onchainos-skills/main/install.sh | sh
+   ```
+4. Create a `.env` file in the project root to override the default API credentials (optional — skip this for quick start):
    ```
    OKX_API_KEY=
    OKX_SECRET_KEY=
@@ -41,6 +50,9 @@ Before using this skill, ensure the `onchainos` CLI is installed:
 - For real-time prices / K-lines / trade history → use `okx-dex-market`
 - For swap execution → use `okx-dex-swap`
 - For transaction broadcasting → use `okx-onchain-gateway`
+- For wallet balances / portfolio → use `okx-wallet-portfolio`
+- For meme token safety (dev reputation, rug pull, bundlers, similar tokens by same dev) → use `okx-dex-market`
+- For smart money / whale / KOL signals → use `okx-dex-market`
 
 ## Quickstart
 
@@ -94,8 +106,11 @@ The CLI accepts human-readable chain names (e.g., `ethereum`, `solana`, `xlayer`
 | K-line / candlestick chart | - | `onchainos market kline` |
 | Trade history (buy/sell log) | - | `onchainos market trades` |
 | Index price (multi-source aggregate) | - | `onchainos market index` |
+| Meme token dev reputation / rug pull | - | `onchainos market memepump-token-dev-info` |
+| Bundle/sniper detection | - | `onchainos market memepump-token-bundle-info` |
+| Similar tokens by same creator | - | `onchainos market memepump-similar-tokens` |
 
-**Rule of thumb**: `okx-dex-token` = token discovery & enriched analytics. `okx-dex-market` = raw price feeds & charts.
+**Rule of thumb**: `okx-dex-token` = token discovery & enriched analytics (search, trending, holders, market cap). `okx-dex-market` = raw price feeds, charts, smart money signals & meme pump scanning (including dev reputation, rug pull checks, bundler analysis).
 
 ## Cross-Skill Workflows
 
@@ -374,6 +389,7 @@ onchainos token holders 0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee --chain xlaye
 - **Unverified token**: `communityRecognized = false` — warn user about risk
 - **Too many results**: name/symbol search caps at 100 — suggest using exact contract address
 - **Network error**: retry once
+- **Region restriction (error code 50125 or 80001)**: do NOT show the raw error code to the user. Instead, display a friendly message: `⚠️ Service is not available in your region. Please switch to a supported region and try again.`
 
 ## Amount Display Rules
 
@@ -386,6 +402,5 @@ onchainos token holders 0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee --chain xlaye
 - Use contract address as **primary identity** — symbols can collide across tokens
 - `communityRecognized = true` means listed on Top 10 CEX or community verified
 - The CLI resolves chain names automatically (e.g., `ethereum` → `1`, `solana` → `501`)
-- All output is JSON format by default; use `-o table` for table format
 - EVM addresses must be **all lowercase**
-- The CLI handles authentication internally via environment variables — see Prerequisites step 5 for default values
+- The CLI handles authentication internally via environment variables — see Prerequisites step 4 for default values
