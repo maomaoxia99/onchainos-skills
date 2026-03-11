@@ -76,17 +76,37 @@ jobs:
           Write-Host "SM_CLIENT_CERT_FILE = $env:SM_CLIENT_CERT_FILE"
           smctl healthcheck 2>&1 | Select-String "Authentication"
 
-          Write-Host "`n=== Test 3: Original P12 (no password env, use saved creds) ==="
-          smctl credentials save $env:SM_API_KEY $env:SM_CLIENT_CERT_PASSWORD 2>&1
-          $env:SM_CLIENT_CERT_PASSWORD = ""
-          smctl healthcheck 2>&1 | Select-String "Authentication"
+          Write-Host "`n=== Test 3: curl mTLS test (bypass smctl) ==="
+          $certFile = "${{ runner.temp }}\client_cert.pem"
+          $keyFile = "${{ runner.temp }}\client_key.pem"
+          $openssl = "C:\Program Files\Git\usr\bin\openssl.exe"
+          $curl = "C:\Program Files\Git\usr\bin\curl.exe"
 
-          # Use whichever format shows 2FA, default to PEM
-          $env:SM_CLIENT_CERT_FILE = $pemFile
+          # Split PEM into cert and key for curl
+          & $openssl x509 -in $pemFile -out $certFile 2>&1
+          & $openssl pkey -in $pemFile -out $keyFile 2>&1
+
+          # Test mTLS connection to DigiCert ONE API
+          & $curl -s -o NUL -w "HTTP Status: %{http_code}" `
+            --cert $certFile --key $keyFile `
+            -H "x-api-key: $env:SM_API_KEY" `
+            "https://one.digicert.com/signingmanager/api/v1/keypairs" 2>&1
+
+          Write-Host ""
+
+          Write-Host "`n=== Test 4: curl mTLS with p12 ==="
+          & $curl -s -o NUL -w "HTTP Status: %{http_code}" `
+            --cert-type P12 --cert "${legacyP12}:$env:SM_CLIENT_CERT_PASSWORD" `
+            -H "x-api-key: $env:SM_API_KEY" `
+            "https://one.digicert.com/signingmanager/api/v1/keypairs" 2>&1
+
+          Write-Host ""
+
+          Write-Host "`n=== Test 5: smctl with debug env ==="
+          $env:SM_CLIENT_CERT_FILE = $legacyP12
           $env:SM_CLIENT_CERT_PASSWORD = "${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
-
-          Write-Host "`n=== Sign attempt ==="
-          smctl sign --simple --keypair-alias "${{ secrets.SM_KEYPAIR_ALIAS }}" --input "${{ env.BIN_NAME }}-test.exe" -v 2>&1
+          $env:SMCTL_LOG_LEVEL = "DEBUG"
+          smctl healthcheck 2>&1 | Select-String "Authentication|Error|error|cert|password" -AllMatches
 
       - name: "Verify signature"
         if: success()
