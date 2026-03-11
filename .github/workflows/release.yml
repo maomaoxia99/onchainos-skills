@@ -143,26 +143,20 @@ jobs:
         with:
           simple-signing-mode: true
 
-      - name: "Debug: verify smctl can authenticate"
+      - name: "Register smctl credentials and verify"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
-        shell: pwsh
+        shell: cmd
         run: |
-          Write-Host "=== Certificate file check ==="
-          Write-Host "SM_CLIENT_CERT_FILE = $env:SM_CLIENT_CERT_FILE"
-          if (Test-Path $env:SM_CLIENT_CERT_FILE) {
-            Write-Host "File exists, size: $((Get-Item $env:SM_CLIENT_CERT_FILE).Length) bytes"
-          } else {
-            Write-Host "::error::CERT FILE NOT FOUND at $env:SM_CLIENT_CERT_FILE"
-            exit 1
-          }
-          Write-Host "=== smctl healthcheck ==="
+          echo === Registering credentials ===
+          smctl credentials save "%SM_HOST%" "%SM_API_KEY%" --credential-type certificate --certificate-file "%SM_CLIENT_CERT_FILE%" --certificate-password "%SM_CLIENT_CERT_PASSWORD%"
+          echo === Healthcheck after credentials save ===
           smctl healthcheck
-          Write-Host "=== smctl keypair list ==="
+          echo === Keypair list ===
           smctl keypair ls
 
       - name: "Sign Windows binary (DigiCert KeyLocker)"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
-        shell: pwsh
+        shell: cmd
         run: |
           smctl sign --keypair-alias "${{ secrets.SM_KEYPAIR_ALIAS }}" --input "${{ env.BIN_NAME }}-${{ matrix.target }}.exe" --exit-non-zero-on-fail --failfast
 
