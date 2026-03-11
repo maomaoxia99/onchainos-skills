@@ -143,16 +143,23 @@ jobs:
         with:
           simple-signing-mode: true
 
-      - name: "Register smctl credentials and verify"
+      - name: "Debug: verify password and cert"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
-        shell: cmd
+        shell: pwsh
         run: |
-          echo === Registering credentials ===
-          smctl credentials save "%SM_HOST%" "%SM_API_KEY%" --credential-type certificate --certificate-file "%SM_CLIENT_CERT_FILE%" --certificate-password "%SM_CLIENT_CERT_PASSWORD%"
-          echo === Healthcheck after credentials save ===
+          Write-Host "Password length: $($env:SM_CLIENT_CERT_PASSWORD.Length)"
+          Write-Host "Password bytes: $([System.Text.Encoding]::UTF8.GetBytes($env:SM_CLIENT_CERT_PASSWORD).Length)"
+          Write-Host "Cert file size: $((Get-Item $env:SM_CLIENT_CERT_FILE).Length)"
+          Write-Host "Cert SHA256: $((Get-FileHash $env:SM_CLIENT_CERT_FILE -Algorithm SHA256).Hash)"
+          # Try to load the p12 with the password to verify they match
+          try {
+            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($env:SM_CLIENT_CERT_FILE, $env:SM_CLIENT_CERT_PASSWORD)
+            Write-Host "P12 load SUCCESS - Subject: $($cert.Subject)"
+          } catch {
+            Write-Host "P12 load FAILED: $_"
+          }
+          Write-Host "=== smctl healthcheck ==="
           smctl healthcheck
-          echo === Keypair list ===
-          smctl keypair ls
 
       - name: "Sign Windows binary (DigiCert KeyLocker)"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
