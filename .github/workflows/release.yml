@@ -122,13 +122,16 @@ jobs:
 
       - name: "Setup DigiCert certificate"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
+        env:
+          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
         shell: pwsh
         run: |
           $certPath = "${{ runner.temp }}\Certificate_pkcs12.p12"
-          $certBytes = [Convert]::FromBase64String("${{ secrets.SM_CLIENT_CERT_FILE_B64 }}")
+          $certBytes = [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64)
           [IO.File]::WriteAllBytes($certPath, $certBytes)
+          $hash = (Get-FileHash $certPath -Algorithm SHA256).Hash
           Write-Host "Certificate file size: $((Get-Item $certPath).Length) bytes"
-          # Use Add-Content with UTF8NoBOM to avoid BOM corruption
+          Write-Host "Certificate SHA256: $hash"
           Add-Content $env:GITHUB_ENV "SM_HOST=https://one.digicert.com"
           Add-Content $env:GITHUB_ENV "SM_CLIENT_CERT_FILE=$certPath"
           Add-Content $env:GITHUB_ENV "SM_CLIENT_CERT_PASSWORD=${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
