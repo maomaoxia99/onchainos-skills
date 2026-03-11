@@ -127,29 +127,35 @@ jobs:
         shell: pwsh
         run: |
           $password = "${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
-          $certPath = "${{ runner.temp }}\Certificate_pkcs12.p12"
+          $originalP12 = "${{ runner.temp }}\cert_original.p12"
+          $pemFile = "${{ runner.temp }}\cert_temp.pem"
+          $finalP12 = "${{ runner.temp }}\Certificate_pkcs12.p12"
+          $openssl = "C:\Program Files\Git\usr\bin\openssl.exe"
 
-          # Decode original p12
+          # Step 1: Decode base64 to original p12
           $certBytes = [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64)
-          $tempPath = "${{ runner.temp }}\cert_original.p12"
-          [IO.File]::WriteAllBytes($tempPath, $certBytes)
+          [IO.File]::WriteAllBytes($originalP12, $certBytes)
+          Write-Host "Original p12 size: $($certBytes.Length) bytes"
 
-          # Re-export using Windows crypto to produce smctl-compatible p12
-          $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
-            $tempPath, $password,
-            [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)
-          $reexported = $cert.Export(
-            [System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $password)
-          [IO.File]::WriteAllBytes($certPath, $reexported)
-          Remove-Item $tempPath
+          # Step 2: Convert to PEM using openssl (extract cert + key)
+          & $openssl pkcs12 -in $originalP12 -out $pemFile -nodes -passin "pass:$password" 2>&1
+          Write-Host "PEM file size: $((Get-Item $pemFile).Length) bytes"
 
-          Write-Host "Original size: $($certBytes.Length) bytes"
-          Write-Host "Re-exported size: $($reexported.Length) bytes"
-          Write-Host "Re-exported SHA256: $((Get-FileHash $certPath -Algorithm SHA256).Hash)"
-          Write-Host "Subject: $($cert.Subject)"
+          # Step 3: Re-create p12 with legacy 3DES encryption (Go/smctl compatible)
+          & $openssl pkcs12 -export -in $pemFile -out $finalP12 -passout "pass:$password" -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg SHA1 2>&1
+          Write-Host "Legacy p12 size: $((Get-Item $finalP12).Length) bytes"
+          Write-Host "Legacy p12 SHA256: $((Get-FileHash $finalP12 -Algorithm SHA256).Hash)"
 
+          # Step 4: Verify the legacy p12 can be loaded
+          $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($finalP12, $password)
+          Write-Host "Verify OK - Subject: $($cert.Subject)"
+
+          # Cleanup temp files
+          Remove-Item $originalP12, $pemFile -ErrorAction SilentlyContinue
+
+          # Set env vars for subsequent steps
           Add-Content $env:GITHUB_ENV "SM_HOST=https://one.digicert.com"
-          Add-Content $env:GITHUB_ENV "SM_CLIENT_CERT_FILE=$certPath"
+          Add-Content $env:GITHUB_ENV "SM_CLIENT_CERT_FILE=$finalP12"
           Add-Content $env:GITHUB_ENV "SM_CLIENT_CERT_PASSWORD=$password"
           Add-Content $env:GITHUB_ENV "SM_CODE_SIGNING_CERT_SHA1_HASH=${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}"
 
@@ -159,30 +165,18 @@ jobs:
         with:
           simple-signing-mode: true
 
-      - name: "Debug: verify password and cert"
+      - name: "Save credentials and verify"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
         shell: pwsh
         run: |
-          Write-Host "=== Certificate File ==="
+          Write-Host "=== Legacy p12 verify ==="
           Write-Host "Cert file: $env:SM_CLIENT_CERT_FILE"
           Write-Host "Cert file size: $((Get-Item $env:SM_CLIENT_CERT_FILE).Length) bytes"
-          Write-Host "Password length: $($env:SM_CLIENT_CERT_PASSWORD.Length)"
 
-          Write-Host "`n=== P12 Load Test (PowerShell) ==="
-          $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
-            $env:SM_CLIENT_CERT_FILE, $env:SM_CLIENT_CERT_PASSWORD)
-          Write-Host "P12 load SUCCESS - Subject: $($cert.Subject) HasPrivateKey: $($cert.HasPrivateKey)"
+          Write-Host "`n=== smctl credentials save ==="
+          smctl credentials save $env:SM_API_KEY $env:SM_CLIENT_CERT_PASSWORD 2>&1
 
-          Write-Host "`n=== certutil verify ==="
-          certutil -dump -p $env:SM_CLIENT_CERT_PASSWORD $env:SM_CLIENT_CERT_FILE 2>&1 | Select-Object -First 30
-
-          Write-Host "`n=== smctl credentials save (no args) ==="
-          smctl credentials save 2>&1
-
-          Write-Host "`n=== smctl credentials save --help ==="
-          smctl credentials save --help 2>&1
-
-          Write-Host "`n=== smctl healthcheck AFTER credentials save ==="
+          Write-Host "`n=== smctl healthcheck ==="
           smctl healthcheck
 
       - name: "Sign Windows binary (DigiCert KeyLocker)"
