@@ -51,18 +51,30 @@ jobs:
           $apiKey = $env:SM_API_KEY
           $keypairAlias = "${{ secrets.SM_KEYPAIR_ALIAS }}"
           $jsign = "${{ runner.temp }}\jsign.jar"
-
-          # jsign DigiCert ONE format: apikey|certfile|certpassword
           $storepass = "${apiKey}|${certFile}|${certPassword}"
+          $exe = "${{ env.BIN_NAME }}-test.exe"
 
-          Write-Host "Signing with jsign..."
-          java -jar $jsign `
-            --storetype DIGICERTONE `
-            --storepass $storepass `
-            --alias $keypairAlias `
-            --tsaurl "http://timestamp.digicert.com" `
-            "${{ env.BIN_NAME }}-test.exe" 2>&1
+          # First, list available keys to find the correct alias
+          Write-Host "=== Listing available keys ==="
+          & curl.exe -s --cert-type P12 --cert "${certFile}:${certPassword}" `
+            -H "x-api-key: $apiKey" `
+            "https://one.digicert.com/signingmanager/api/v1/certificates" 2>&1
 
+          Write-Host "`n`n=== Try 1: keypair alias ==="
+          java -jar $jsign --storetype DIGICERTONE --storepass $storepass --alias $keypairAlias $exe 2>&1
+          Write-Host "Exit code: $LASTEXITCODE"
+
+          # Restore exe for next attempt
+          Copy-Item "C:\Windows\System32\cmd.exe" "$PWD\$exe" -Force
+
+          Write-Host "`n=== Try 2: keypair ID ==="
+          java -jar $jsign --storetype DIGICERTONE --storepass $storepass --alias "68a29608-115f-4e75-8b7e-471ab546dd08" $exe 2>&1
+          Write-Host "Exit code: $LASTEXITCODE"
+
+          Copy-Item "C:\Windows\System32\cmd.exe" "$PWD\$exe" -Force
+
+          Write-Host "`n=== Try 3: certificate ID ==="
+          java -jar $jsign --storetype DIGICERTONE --storepass $storepass --alias "2a460f9d-91e1-4b90-aaeb-144157bb59ac" $exe 2>&1
           Write-Host "Exit code: $LASTEXITCODE"
 
       - name: "Verify signature"
