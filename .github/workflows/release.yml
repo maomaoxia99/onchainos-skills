@@ -3,7 +3,6 @@
 # Trigger: push a version tag (e.g. v0.1.0)
 # Flow: validate tag → build 9 platforms → publish Release
 # Artifacts: raw binaries (not tar.gz), with checksums.txt
-# Windows signing: jsign + DigiCert ONE (bypasses smctl p12 bug)
 # ──────────────────────────────────────────────────────────────
 name: Release
 
@@ -48,6 +47,8 @@ jobs:
   build:
     needs: meta
     runs-on: ${{ matrix.os }}
+    env:
+      SM_API_KEY: ${{ secrets.SM_API_KEY }}
     strategy:
       fail-fast: false
       matrix:
@@ -121,24 +122,25 @@ jobs:
 
       # ── Windows code signing with jsign + DigiCert ONE ──
       - name: "Setup DigiCert certificate"
-        if: runner.os == 'Windows' && secrets.SM_API_KEY != ''
+        if: runner.os == 'Windows' && env.SM_API_KEY != ''
         env:
           SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
         shell: pwsh
         run: |
           $certPath = "${{ runner.temp }}\Certificate_pkcs12.p12"
           [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64))
+          Write-Host "Certificate file size: $((Get-Item $certPath).Length) bytes"
           "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
 
       - name: "Download jsign"
-        if: runner.os == 'Windows' && secrets.SM_API_KEY != ''
+        if: runner.os == 'Windows' && env.SM_API_KEY != ''
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri "https://github.com/ebourg/jsign/releases/download/7.0/jsign-7.0.jar" `
             -OutFile "${{ runner.temp }}\jsign.jar"
 
       - name: "Sign Windows binary (DigiCert ONE via jsign)"
-        if: runner.os == 'Windows' && secrets.SM_API_KEY != ''
+        if: runner.os == 'Windows' && env.SM_API_KEY != ''
         shell: pwsh
         run: |
           $storepass = "${{ secrets.SM_API_KEY }}|${{ env.SM_CLIENT_CERT_FILE }}|${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
@@ -150,7 +152,7 @@ jobs:
             "${{ env.BIN_NAME }}-${{ matrix.target }}.exe"
 
       - name: "Verify Windows binary signature"
-        if: runner.os == 'Windows' && secrets.SM_API_KEY != ''
+        if: runner.os == 'Windows' && env.SM_API_KEY != ''
         shell: pwsh
         run: |
           $sig = Get-AuthenticodeSignature "${{ env.BIN_NAME }}-${{ matrix.target }}.exe"
