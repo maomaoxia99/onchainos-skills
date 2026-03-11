@@ -1,6 +1,9 @@
 # ──────────────────────────────────────────────────────────────
-# DEBUG: Windows signing test only (temporary)
-# Using jsign instead of smctl (smctl has p12 parsing bug)
+# Automated release pipeline
+# Trigger: push a version tag (e.g. v0.1.0)
+# Flow: validate tag → build 9 platforms → publish Release
+# Artifacts: raw binaries (not tar.gz), with checksums.txt
+# Windows signing: jsign + DigiCert ONE (bypasses smctl p12 bug)
 # ──────────────────────────────────────────────────────────────
 name: Release
 
@@ -12,75 +15,177 @@ permissions:
   contents: write
 
 env:
+  CARGO_TERM_COLOR: always
+  CARGO_DIR: cli
   BIN_NAME: onchainos
 
 jobs:
-  sign-test:
-    runs-on: windows-latest
-    env:
-      SM_API_KEY: ${{ secrets.SM_API_KEY }}
+  # ── Step 1: Validate tag matches Cargo.toml version ──────────
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+      tag: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from Cargo.toml
+        id: version
+        run: |
+          VER=$(grep '^version' ${{ env.CARGO_DIR }}/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "value=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Validate tag matches Cargo.toml version
+        run: |
+          TAG="${{ github.ref_name }}"
+          VER="v${{ steps.version.outputs.value }}"
+          if [ "$TAG" != "$VER" ]; then
+            echo "::error::Tag ($TAG) does not match Cargo.toml version ($VER). Please update Cargo.toml first."
+            exit 1
+          fi
+
+  # ── Step 2: Build raw binaries for 9 platforms in parallel ──────────
+  build:
+    needs: meta
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── macOS (Apple Silicon + Intel) ──
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          # ── Linux (x64 native, others via cross-compilation) ──
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest }
+          - { target: i686-unknown-linux-gnu, os: ubuntu-latest, cross: true }
+          - {
+              target: aarch64-unknown-linux-gnu,
+              os: ubuntu-latest,
+              cross: true,
+            }
+          - {
+              target: armv7-unknown-linux-gnueabihf,
+              os: ubuntu-latest,
+              cross: true,
+            }
+          # ── Windows (x64 / x86 / ARM64) ──
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+          - { target: i686-pc-windows-msvc, os: windows-latest }
+          - { target: aarch64-pc-windows-msvc, os: windows-latest }
+
+    name: Build ${{ matrix.target }}
 
     steps:
-      - name: "Create dummy exe"
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ env.CARGO_DIR }}
+          key: ${{ matrix.target }}
+
+      - name: "Install cross (Linux cross-compilation tool)"
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build release binary
+        working-directory: ${{ env.CARGO_DIR }}
+        shell: bash
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: "Prepare artifact (Unix: strip symbols + rename)"
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          src="${{ env.CARGO_DIR }}/target/${{ matrix.target }}/release/${{ env.BIN_NAME }}"
+          if [ "${{ matrix.cross }}" != "true" ]; then
+            strip "$src" 2>/dev/null || true
+          fi
+          cp "$src" "${{ env.BIN_NAME }}-${{ matrix.target }}"
+          chmod +x "${{ env.BIN_NAME }}-${{ matrix.target }}"
+
+      - name: "Prepare artifact (Windows: rename .exe)"
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Copy-Item "C:\Windows\System32\cmd.exe" "$PWD\${{ env.BIN_NAME }}-test.exe"
+          Copy-Item "${{ env.CARGO_DIR }}\target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe" `
+                    "${{ env.BIN_NAME }}-${{ matrix.target }}.exe"
 
+      # ── Windows code signing with jsign + DigiCert ONE ──
       - name: "Setup DigiCert certificate"
+        if: runner.os == 'Windows' && secrets.SM_API_KEY != ''
         env:
           SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
         shell: pwsh
         run: |
           $certPath = "${{ runner.temp }}\Certificate_pkcs12.p12"
           [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64))
-          Write-Host "Certificate size: $((Get-Item $certPath).Length) bytes"
           "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
 
       - name: "Download jsign"
+        if: runner.os == 'Windows' && secrets.SM_API_KEY != ''
         shell: pwsh
         run: |
-          $jsignUrl = "https://github.com/ebourg/jsign/releases/download/7.0/jsign-7.0.jar"
-          Invoke-WebRequest -Uri $jsignUrl -OutFile "${{ runner.temp }}\jsign.jar"
-          Write-Host "jsign downloaded: $((Get-Item "${{ runner.temp }}\jsign.jar").Length) bytes"
+          Invoke-WebRequest -Uri "https://github.com/ebourg/jsign/releases/download/7.0/jsign-7.0.jar" `
+            -OutFile "${{ runner.temp }}\jsign.jar"
 
-      - name: "Sign with jsign (DigiCert ONE)"
+      - name: "Sign Windows binary (DigiCert ONE via jsign)"
+        if: runner.os == 'Windows' && secrets.SM_API_KEY != ''
         shell: pwsh
         run: |
-          $certFile = $env:SM_CLIENT_CERT_FILE
-          $certPassword = "${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
-          $apiKey = $env:SM_API_KEY
-          $keypairAlias = "${{ secrets.SM_KEYPAIR_ALIAS }}"
-          $jsign = "${{ runner.temp }}\jsign.jar"
-          $storepass = "${apiKey}|${certFile}|${certPassword}"
-          $exe = "${{ env.BIN_NAME }}-test.exe"
+          $storepass = "${{ secrets.SM_API_KEY }}|${{ env.SM_CLIENT_CERT_FILE }}|${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
+          java -jar "${{ runner.temp }}\jsign.jar" `
+            --storetype DIGICERTONE `
+            --storepass $storepass `
+            --alias "${{ secrets.SM_CERTIFICATE_ID }}" `
+            --tsaurl "http://timestamp.digicert.com" `
+            "${{ env.BIN_NAME }}-${{ matrix.target }}.exe"
 
-          # First, list available keys to find the correct alias
-          Write-Host "=== Listing available keys ==="
-          & curl.exe -s --cert-type P12 --cert "${certFile}:${certPassword}" `
-            -H "x-api-key: $apiKey" `
-            "https://one.digicert.com/signingmanager/api/v1/certificates" 2>&1
-
-          Write-Host "`n`n=== Try 1: keypair alias ==="
-          java -jar $jsign --storetype DIGICERTONE --storepass $storepass --alias $keypairAlias $exe 2>&1
-          Write-Host "Exit code: $LASTEXITCODE"
-
-          # Restore exe for next attempt
-          Copy-Item "C:\Windows\System32\cmd.exe" "$PWD\$exe" -Force
-
-          Write-Host "`n=== Try 2: keypair ID ==="
-          java -jar $jsign --storetype DIGICERTONE --storepass $storepass --alias "68a29608-115f-4e75-8b7e-471ab546dd08" $exe 2>&1
-          Write-Host "Exit code: $LASTEXITCODE"
-
-          Copy-Item "C:\Windows\System32\cmd.exe" "$PWD\$exe" -Force
-
-          Write-Host "`n=== Try 3: certificate ID ==="
-          java -jar $jsign --storetype DIGICERTONE --storepass $storepass --alias "2a460f9d-91e1-4b90-aaeb-144157bb59ac" $exe 2>&1
-          Write-Host "Exit code: $LASTEXITCODE"
-
-      - name: "Verify signature"
+      - name: "Verify Windows binary signature"
+        if: runner.os == 'Windows' && secrets.SM_API_KEY != ''
         shell: pwsh
         run: |
-          $sig = Get-AuthenticodeSignature "${{ env.BIN_NAME }}-test.exe"
-          Write-Host "Status: $($sig.Status)"
+          $sig = Get-AuthenticodeSignature "${{ env.BIN_NAME }}-${{ matrix.target }}.exe"
+          Write-Host "Signature status: $($sig.Status)"
           Write-Host "Signer: $($sig.SignerCertificate.Subject)"
-          Write-Host "Timestamp: $($sig.TimeStamperCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') {
+            Write-Host "::warning::Code signing verification failed with status: $($sig.Status)"
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BIN_NAME }}-${{ matrix.target }}
+          path: ${{ env.BIN_NAME }}-${{ matrix.target }}*
+
+  # ── Step 3: Create GitHub Release ──────────────────────────────
+  release:
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Generate SHA256 checksum file
+        run: sha256sum ${{ env.BIN_NAME }}-* > checksums.txt
+
+      - name: List all release artifacts
+        run: ls -lh && echo "---" && cat checksums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ${{ needs.meta.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            ${{ env.BIN_NAME }}-*
+            checksums.txt
