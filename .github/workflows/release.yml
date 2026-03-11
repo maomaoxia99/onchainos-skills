@@ -120,39 +120,16 @@ jobs:
           Copy-Item "${{ env.CARGO_DIR }}\target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe" `
                     "${{ env.BIN_NAME }}-${{ matrix.target }}.exe"
 
-      - name: "Setup DigiCert certificate"
+      - name: "Setup DigiCert certificate and env vars"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
-        env:
-          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
-        shell: pwsh
+        shell: bash
         run: |
-          $certPath = "$env:RUNNER_TEMP\Certificate_pkcs12.p12"
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64))
-          Write-Host "Certificate file size: $((Get-Item $certPath).Length) bytes"
-
-      - name: "Debug: verify cert file and env vars"
-        if: runner.os == 'Windows' && env.SM_API_KEY != ''
-        shell: pwsh
-        env:
-          SM_CLIENT_CERT_FILE: ${{ runner.temp }}\Certificate_pkcs12.p12
-          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-        run: |
-          Write-Host "SM_CLIENT_CERT_FILE = $env:SM_CLIENT_CERT_FILE"
-          Write-Host "Cert file exists: $(Test-Path $env:SM_CLIENT_CERT_FILE)"
-          if (Test-Path $env:SM_CLIENT_CERT_FILE) {
-            Write-Host "Cert file size: $((Get-Item $env:SM_CLIENT_CERT_FILE).Length) bytes"
-          }
-          Write-Host "SM_CLIENT_CERT_PASSWORD is set: $($env:SM_CLIENT_CERT_PASSWORD.Length -gt 0)"
-          # Validate the p12 can be loaded
-          try {
-            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
-              $env:SM_CLIENT_CERT_FILE, $env:SM_CLIENT_CERT_PASSWORD)
-            Write-Host "Cert subject: $($cert.Subject)"
-            Write-Host "Cert thumbprint: $($cert.Thumbprint)"
-            Write-Host "Cert valid: $($cert.NotBefore) - $($cert.NotAfter)"
-          } catch {
-            Write-Host "::warning::Failed to load p12 certificate: $_"
-          }
+          echo "${{ secrets.SM_CLIENT_CERT_FILE_B64 }}" | base64 --decode > /d/Certificate_pkcs12.p12
+          echo "SM_HOST=https://one.digicert.com" >> "$GITHUB_ENV"
+          echo "SM_CLIENT_CERT_FILE=D:\\Certificate_pkcs12.p12" >> "$GITHUB_ENV"
+          echo "SM_CLIENT_CERT_PASSWORD=${{ secrets.SM_CLIENT_CERT_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "SM_CODE_SIGNING_CERT_SHA1_HASH=${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}" >> "$GITHUB_ENV"
+          echo "Certificate file size: $(wc -c < /d/Certificate_pkcs12.p12) bytes"
 
       - name: "Sign Windows binary (DigiCert KeyLocker)"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
@@ -161,12 +138,6 @@ jobs:
           input: ${{ env.BIN_NAME }}-${{ matrix.target }}.exe
           keypair-alias: ${{ secrets.SM_KEYPAIR_ALIAS }}
           simple-signing-mode: true
-        env:
-          SM_API_KEY: ${{ secrets.SM_API_KEY }}
-          SM_HOST: https://one.digicert.com
-          SM_CLIENT_CERT_FILE: ${{ runner.temp }}\Certificate_pkcs12.p12
-          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-          SM_CODE_SIGNING_CERT_SHA1_HASH: ${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}
 
       - name: "Verify Windows binary signature"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
