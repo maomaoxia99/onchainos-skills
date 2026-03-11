@@ -80,7 +80,7 @@ jobs:
           $certFile = "${{ runner.temp }}\client_cert.pem"
           $keyFile = "${{ runner.temp }}\client_key.pem"
           $openssl = "C:\Program Files\Git\usr\bin\openssl.exe"
-          $curl = "C:\Program Files\Git\usr\bin\curl.exe"
+          $curl = "curl.exe"
 
           # Split PEM into cert and key for curl
           & $openssl x509 -in $pemFile -out $certFile 2>&1
