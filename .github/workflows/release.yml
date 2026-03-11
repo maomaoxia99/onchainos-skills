@@ -91,14 +91,14 @@ jobs:
           Write-Host "`n=== smctl healthcheck ==="
           smctl healthcheck
 
-          Write-Host "`n=== Try sign with --verbose flag ==="
-          smctl sign --keypair-alias "${{ secrets.SM_KEYPAIR_ALIAS }}" --input "${{ env.BIN_NAME }}-test.exe" -v 2>&1
+          Write-Host "`n=== Try sign with --simple and --verbose ==="
+          smctl sign --simple --keypair-alias "${{ secrets.SM_KEYPAIR_ALIAS }}" --input "${{ env.BIN_NAME }}-test.exe" -v 2>&1
 
-      - name: "Sign test exe (if healthcheck failed, try anyway)"
+      - name: "Sign test exe"
         if: env.SM_API_KEY != ''
         shell: cmd
         run: |
-          smctl sign --keypair-alias "${{ secrets.SM_KEYPAIR_ALIAS }}" --input "${{ env.BIN_NAME }}-test.exe" --exit-non-zero-on-fail --failfast
+          smctl sign --simple --keypair-alias "${{ secrets.SM_KEYPAIR_ALIAS }}" --input "${{ env.BIN_NAME }}-test.exe" --exit-non-zero-on-fail --failfast
 
       - name: "Verify signature"
         if: env.SM_API_KEY != ''
