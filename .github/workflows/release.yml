@@ -130,19 +130,28 @@ jobs:
           [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64))
           Write-Host "Certificate file size: $((Get-Item $certPath).Length) bytes"
 
-      - name: "Sign Windows binary (DigiCert KeyLocker)"
+      - name: "Setup DigiCert KeyLocker signing tools"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
         uses: digicert/code-signing-software-trust-action@v1
-        with:
-          input: ${{ env.BIN_NAME }}-${{ matrix.target }}.exe
-          command: sign
-          keypair-alias: ${{ secrets.SM_KEYPAIR_ALIAS }}
         env:
           SM_API_KEY: ${{ secrets.SM_API_KEY }}
           SM_HOST: https://one.digicert.com
           SM_CLIENT_CERT_FILE: ${{ runner.temp }}\Certificate_pkcs12.p12
           SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
           SM_CODE_SIGNING_CERT_SHA1_HASH: ${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}
+
+      - name: "Sign Windows binary (smctl)"
+        if: runner.os == 'Windows' && env.SM_API_KEY != ''
+        shell: pwsh
+        env:
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_HOST: https://one.digicert.com
+          SM_CLIENT_CERT_FILE: ${{ runner.temp }}\Certificate_pkcs12.p12
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+          SM_CODE_SIGNING_CERT_SHA1_HASH: ${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}
+        run: |
+          smctl sign --keypair-alias ${{ secrets.SM_KEYPAIR_ALIAS }} --input "${{ env.BIN_NAME }}-${{ matrix.target }}.exe"
+          Write-Host "smctl sign exit code: $LASTEXITCODE"
 
       - name: "Verify Windows binary signature"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
