@@ -110,59 +110,24 @@ jobs:
           Copy-Item "${{ env.CARGO_DIR }}\target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe" `
                     "${{ env.BIN_NAME }}-${{ matrix.target }}.exe"
 
+      - name: "Setup certificate file"
+        if: runner.os == 'Windows'
+        run: |
+          echo "${{ secrets.SM_CLIENT_CERT_FILE_B64 }}" | base64 --decode > /d/Certificate_pkcs12.p12
+        shell: bash
+
       - name: "Sign Windows binary (DigiCert KeyLocker)"
         if: runner.os == 'Windows'
+        uses: digicert/code-signing-software-trust-action@v1
+        with:
+          simple-signing-mode: true
+          input: ${{ env.BIN_NAME }}-${{ matrix.target }}.exe
+          keypair-alias: ${{ secrets.SM_KEYPAIR_ALIAS }}
         env:
+          SM_HOST: ${{ vars.SM_HOST }}
           SM_API_KEY: ${{ secrets.SM_API_KEY }}
-          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+          SM_CLIENT_CERT_FILE: D:\\Certificate_pkcs12.p12
           SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-          SM_KEYPAIR_ALIAS: ${{ secrets.SM_KEYPAIR_ALIAS }}
-        shell: pwsh
-        run: |
-          # Skip if secrets not configured (fork/PR builds)
-          if (-not $env:SM_API_KEY) {
-            Write-Warning "Skipping Windows signing - secrets not configured"
-            exit 0
-          }
-
-          $artifact = "${{ env.BIN_NAME }}-${{ matrix.target }}.exe"
-
-          # 1. Install DigiCert smtools
-          $url = "https://one.digicert.com/signingmanager/api-ui/v1/releases/smtools-windows-x64.msi/download"
-          Invoke-WebRequest -Uri $url -Headers @{ "x-api-key" = $env:SM_API_KEY } -OutFile "$env:RUNNER_TEMP\smtools.msi"
-          Start-Process msiexec.exe -ArgumentList "/i `"$env:RUNNER_TEMP\smtools.msi`" /quiet /qn" -Wait
-          $machinePath = [Environment]::GetEnvironmentVariable("PATH", "Machine")
-          $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
-          $env:PATH = "$machinePath;$userPath;C:\Program Files\DigiCert\DigiCert Signing Manager Tools"
-
-          # 2. Restore certificate to temp file
-          $certPath = "$env:RUNNER_TEMP\cert.p12"
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64))
-          [System.Environment]::SetEnvironmentVariable("SM_CLIENT_CERT_FILE", $certPath, "Process")
-
-          # 3. Configure credentials
-          smctl credentials save $env:SM_API_KEY $env:SM_CLIENT_CERT_PASSWORD
-
-          # 4. Verify KeyLocker connection
-          smctl keypair list
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "DigiCert KeyLocker authentication failed"
-            exit 1
-          }
-
-          # 5. Sign the binary
-          smctl sign --keypair-alias $env:SM_KEYPAIR_ALIAS --input $artifact
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Signing failed for $artifact"
-            exit 1
-          }
-
-          # 6. Verify signature
-          smctl sign verify --input $artifact
-
-          # 7. Cleanup certificate
-          Remove-Item $certPath -Force
-          Write-Host "Signed successfully: $artifact"
 
       - uses: actions/upload-artifact@v4
         with:
