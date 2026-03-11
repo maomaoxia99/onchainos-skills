@@ -1,6 +1,5 @@
 # ──────────────────────────────────────────────────────────────
 # DEBUG: Windows signing test only (temporary)
-# Trigger: push a version tag (e.g. v0.1.0)
 # ──────────────────────────────────────────────────────────────
 name: Release
 
@@ -19,91 +18,64 @@ jobs:
     runs-on: windows-latest
     env:
       SM_API_KEY: ${{ secrets.SM_API_KEY }}
+      SM_HOST: https://one.digicert.com
+      SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+      SM_CODE_SIGNING_CERT_SHA1_HASH: ${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}
 
     steps:
-      - name: "Create dummy exe for signing test"
+      - name: "Create dummy exe"
         shell: pwsh
         run: |
-          # Create a minimal valid PE file (not just empty)
-          $bytes = [System.IO.File]::ReadAllBytes("C:\Windows\System32\cmd.exe")
-          [System.IO.File]::WriteAllBytes("$PWD\${{ env.BIN_NAME }}-test.exe", $bytes)
-          Write-Host "Test exe size: $((Get-Item "${{ env.BIN_NAME }}-test.exe").Length) bytes"
+          Copy-Item "C:\Windows\System32\cmd.exe" "$PWD\${{ env.BIN_NAME }}-test.exe"
 
       - name: "Setup DigiCert certificate"
-        if: env.SM_API_KEY != ''
         env:
           SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
         shell: pwsh
         run: |
-          $password = "${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
-          $originalP12 = "${{ runner.temp }}\cert_original.p12"
-          $pemFile = "${{ runner.temp }}\cert_temp.pem"
-          $finalP12 = "${{ runner.temp }}\Certificate_pkcs12.p12"
+          $certPath = "${{ runner.temp }}\Certificate_pkcs12.p12"
           $openssl = "C:\Program Files\Git\usr\bin\openssl.exe"
+          $password = $env:SM_CLIENT_CERT_PASSWORD
 
-          # Step 1: Decode base64 to original p12
-          $certBytes = [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64)
-          [IO.File]::WriteAllBytes($originalP12, $certBytes)
-          Write-Host "Original p12 size: $($certBytes.Length) bytes"
+          # Decode original p12
+          $originalP12 = "${{ runner.temp }}\cert_original.p12"
+          [IO.File]::WriteAllBytes($originalP12, [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64))
 
-          # Step 2: Convert to PEM (extract cert + key)
-          & $openssl pkcs12 -in $originalP12 -out $pemFile -nodes -passin "pass:$password" 2>&1
-          Write-Host "PEM file size: $((Get-Item $pemFile).Length) bytes"
+          # Convert to legacy 3DES format via openssl
+          $pemFile = "${{ runner.temp }}\cert_temp.pem"
+          & $openssl pkcs12 -in $originalP12 -out $pemFile -nodes -passin "pass:$password"
+          & $openssl pkcs12 -export -in $pemFile -out $certPath -passout "pass:$password" -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg SHA1
 
-          # Step 3: Re-create p12 with legacy 3DES encryption (Go/smctl compatible)
-          & $openssl pkcs12 -export -in $pemFile -out $finalP12 -passout "pass:$password" -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg SHA1 2>&1
-          Write-Host "Legacy p12 size: $((Get-Item $finalP12).Length) bytes"
-          Write-Host "Legacy p12 SHA256: $((Get-FileHash $finalP12 -Algorithm SHA256).Hash)"
-
-          # Step 4: Verify
-          $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($finalP12, $password)
-          Write-Host "Verify OK - Subject: $($cert.Subject)"
-
-          # Cleanup
+          Write-Host "Legacy p12 size: $((Get-Item $certPath).Length) bytes"
           Remove-Item $originalP12, $pemFile -ErrorAction SilentlyContinue
 
-          # Set env vars
-          Add-Content $env:GITHUB_ENV "SM_HOST=https://one.digicert.com"
-          Add-Content $env:GITHUB_ENV "SM_CLIENT_CERT_FILE=$finalP12"
-          Add-Content $env:GITHUB_ENV "SM_CLIENT_CERT_PASSWORD=$password"
-          Add-Content $env:GITHUB_ENV "SM_CODE_SIGNING_CERT_SHA1_HASH=${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}"
+          # Set ONLY the cert file path via GITHUB_ENV (password already in job env)
+          "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
 
       - name: "Install smctl"
-        if: env.SM_API_KEY != ''
         uses: digicert/code-signing-software-trust-action@v1
         with:
           simple-signing-mode: true
 
-      - name: "Save credentials and verify"
-        if: env.SM_API_KEY != ''
+      - name: "Verify and sign"
         shell: pwsh
         run: |
-          Write-Host "=== Legacy p12 verify ==="
-          Write-Host "Cert file: $env:SM_CLIENT_CERT_FILE"
+          Write-Host "=== Env check ==="
+          Write-Host "SM_HOST: $env:SM_HOST"
+          Write-Host "SM_CLIENT_CERT_FILE: $env:SM_CLIENT_CERT_FILE"
+          Write-Host "SM_API_KEY length: $($env:SM_API_KEY.Length)"
+          Write-Host "SM_CLIENT_CERT_PASSWORD length: $($env:SM_CLIENT_CERT_PASSWORD.Length)"
           Write-Host "Cert file size: $((Get-Item $env:SM_CLIENT_CERT_FILE).Length) bytes"
 
-          Write-Host "`n=== certutil verify legacy p12 ==="
-          certutil -dump -p $env:SM_CLIENT_CERT_PASSWORD $env:SM_CLIENT_CERT_FILE 2>&1 | Select-Object -First 15
-
-          Write-Host "`n=== smctl credentials save ==="
-          smctl credentials save $env:SM_API_KEY $env:SM_CLIENT_CERT_PASSWORD 2>&1
-
-          Write-Host "`n=== smctl healthcheck ==="
+          Write-Host "`n=== Healthcheck ==="
           smctl healthcheck
 
-          Write-Host "`n=== Try sign with --simple and --verbose ==="
+          Write-Host "`n=== Sign (simple mode) ==="
           smctl sign --simple --keypair-alias "${{ secrets.SM_KEYPAIR_ALIAS }}" --input "${{ env.BIN_NAME }}-test.exe" -v 2>&1
 
-      - name: "Sign test exe"
-        if: env.SM_API_KEY != ''
-        shell: cmd
-        run: |
-          smctl sign --simple --keypair-alias "${{ secrets.SM_KEYPAIR_ALIAS }}" --input "${{ env.BIN_NAME }}-test.exe" --exit-non-zero-on-fail --failfast
-
       - name: "Verify signature"
-        if: env.SM_API_KEY != ''
+        if: success()
         shell: pwsh
         run: |
           $sig = Get-AuthenticodeSignature "${{ env.BIN_NAME }}-test.exe"
-          Write-Host "Signature status: $($sig.Status)"
-          Write-Host "Signer: $($sig.SignerCertificate.Subject)"
+          Write-Host "Status: $($sig.Status) Signer: $($sig.SignerCertificate.Subject)"
