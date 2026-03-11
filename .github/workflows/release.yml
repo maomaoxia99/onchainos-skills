@@ -1,5 +1,6 @@
 # ──────────────────────────────────────────────────────────────
 # DEBUG: Windows signing test only (temporary)
+# Using jsign instead of smctl (smctl has p12 parsing bug)
 # ──────────────────────────────────────────────────────────────
 name: Release
 
@@ -18,9 +19,6 @@ jobs:
     runs-on: windows-latest
     env:
       SM_API_KEY: ${{ secrets.SM_API_KEY }}
-      SM_HOST: https://one.digicert.com
-      SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-      SM_CODE_SIGNING_CERT_SHA1_HASH: ${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}
 
     steps:
       - name: "Create dummy exe"
@@ -33,84 +31,44 @@ jobs:
           SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
         shell: pwsh
         run: |
-          $openssl = "C:\Program Files\Git\usr\bin\openssl.exe"
-          $password = $env:SM_CLIENT_CERT_PASSWORD
-          $originalP12 = "${{ runner.temp }}\cert_original.p12"
+          $certPath = "${{ runner.temp }}\Certificate_pkcs12.p12"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64))
+          Write-Host "Certificate size: $((Get-Item $certPath).Length) bytes"
+          "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
 
-          # Decode original p12
-          [IO.File]::WriteAllBytes($originalP12, [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64))
-
-          # Approach 1: PEM format (cert + key in one file)
-          $pemFile = "${{ runner.temp }}\Certificate.pem"
-          & $openssl pkcs12 -in $originalP12 -out $pemFile -nodes -passin "pass:$password" 2>&1
-          Write-Host "PEM file size: $((Get-Item $pemFile).Length) bytes"
-
-          # Approach 2: Also keep a legacy p12 as fallback
-          $legacyP12 = "${{ runner.temp }}\Certificate_pkcs12.p12"
-          & $openssl pkcs12 -export -in $pemFile -out $legacyP12 -passout "pass:$password" -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg SHA1 2>&1
-          Write-Host "Legacy p12 size: $((Get-Item $legacyP12).Length) bytes"
-
-          Remove-Item $originalP12 -ErrorAction SilentlyContinue
-
-          # Try PEM first - smctl might support it
-          "SM_CLIENT_CERT_FILE=$pemFile" >> $env:GITHUB_ENV
-
-      - name: "Install smctl"
-        uses: digicert/code-signing-software-trust-action@v1
-        with:
-          simple-signing-mode: true
-
-      - name: "Verify and sign"
+      - name: "Download jsign"
         shell: pwsh
         run: |
-          $pemFile = "${{ runner.temp }}\Certificate.pem"
-          $legacyP12 = "${{ runner.temp }}\Certificate_pkcs12.p12"
+          $jsignUrl = "https://github.com/ebourg/jsign/releases/download/7.0/jsign-7.0.jar"
+          Invoke-WebRequest -Uri $jsignUrl -OutFile "${{ runner.temp }}\jsign.jar"
+          Write-Host "jsign downloaded: $((Get-Item "${{ runner.temp }}\jsign.jar").Length) bytes"
 
-          Write-Host "=== Test 1: PEM format ==="
-          $env:SM_CLIENT_CERT_FILE = $pemFile
-          Write-Host "SM_CLIENT_CERT_FILE = $env:SM_CLIENT_CERT_FILE"
-          smctl healthcheck 2>&1 | Select-String "Authentication"
+      - name: "Sign with jsign (DigiCert ONE)"
+        shell: pwsh
+        run: |
+          $certFile = $env:SM_CLIENT_CERT_FILE
+          $certPassword = "${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
+          $apiKey = $env:SM_API_KEY
+          $keypairAlias = "${{ secrets.SM_KEYPAIR_ALIAS }}"
+          $jsign = "${{ runner.temp }}\jsign.jar"
 
-          Write-Host "`n=== Test 2: Legacy P12 format ==="
-          $env:SM_CLIENT_CERT_FILE = $legacyP12
-          Write-Host "SM_CLIENT_CERT_FILE = $env:SM_CLIENT_CERT_FILE"
-          smctl healthcheck 2>&1 | Select-String "Authentication"
+          # jsign DigiCert ONE format: apikey|certfile|certpassword
+          $storepass = "${apiKey}|${certFile}|${certPassword}"
 
-          Write-Host "`n=== Test 3: curl mTLS test (bypass smctl) ==="
-          $certFile = "${{ runner.temp }}\client_cert.pem"
-          $keyFile = "${{ runner.temp }}\client_key.pem"
-          $openssl = "C:\Program Files\Git\usr\bin\openssl.exe"
-          $curl = "curl.exe"
+          Write-Host "Signing with jsign..."
+          java -jar $jsign `
+            --storetype DIGICERTONE `
+            --storepass $storepass `
+            --alias $keypairAlias `
+            --tsaurl "http://timestamp.digicert.com" `
+            "${{ env.BIN_NAME }}-test.exe" 2>&1
 
-          # Split PEM into cert and key for curl
-          & $openssl x509 -in $pemFile -out $certFile 2>&1
-          & $openssl pkey -in $pemFile -out $keyFile 2>&1
-
-          # Test mTLS connection to DigiCert ONE API
-          & $curl -s -o NUL -w "HTTP Status: %{http_code}" `
-            --cert $certFile --key $keyFile `
-            -H "x-api-key: $env:SM_API_KEY" `
-            "https://one.digicert.com/signingmanager/api/v1/keypairs" 2>&1
-
-          Write-Host ""
-
-          Write-Host "`n=== Test 4: curl mTLS with p12 ==="
-          & $curl -s -o NUL -w "HTTP Status: %{http_code}" `
-            --cert-type P12 --cert "${legacyP12}:$env:SM_CLIENT_CERT_PASSWORD" `
-            -H "x-api-key: $env:SM_API_KEY" `
-            "https://one.digicert.com/signingmanager/api/v1/keypairs" 2>&1
-
-          Write-Host ""
-
-          Write-Host "`n=== Test 5: smctl with debug env ==="
-          $env:SM_CLIENT_CERT_FILE = $legacyP12
-          $env:SM_CLIENT_CERT_PASSWORD = "${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
-          $env:SMCTL_LOG_LEVEL = "DEBUG"
-          smctl healthcheck 2>&1 | Select-String "Authentication|Error|error|cert|password" -AllMatches
+          Write-Host "Exit code: $LASTEXITCODE"
 
       - name: "Verify signature"
-        if: success()
         shell: pwsh
         run: |
           $sig = Get-AuthenticodeSignature "${{ env.BIN_NAME }}-test.exe"
-          Write-Host "Status: $($sig.Status) Signer: $($sig.SignerCertificate.Subject)"
+          Write-Host "Status: $($sig.Status)"
+          Write-Host "Signer: $($sig.SignerCertificate.Subject)"
+          Write-Host "Timestamp: $($sig.TimeStamperCertificate.Subject)"
