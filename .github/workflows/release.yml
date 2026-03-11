@@ -120,24 +120,39 @@ jobs:
           Copy-Item "${{ env.CARGO_DIR }}\target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe" `
                     "${{ env.BIN_NAME }}-${{ matrix.target }}.exe"
 
-      - name: "Setup DigiCert certificate and env vars"
+      - name: "Setup DigiCert certificate"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
         shell: bash
         run: |
-          echo "${{ secrets.SM_CLIENT_CERT_FILE_B64 }}" | base64 --decode > /d/Certificate_pkcs12.p12
+          echo "${{ secrets.SM_CLIENT_CERT_FILE_B64 }}" | base64 --decode > "${RUNNER_TEMP}/Certificate_pkcs12.p12"
           echo "SM_HOST=https://one.digicert.com" >> "$GITHUB_ENV"
-          echo "SM_CLIENT_CERT_FILE=D:\\Certificate_pkcs12.p12" >> "$GITHUB_ENV"
+          echo "SM_CLIENT_CERT_FILE=${RUNNER_TEMP}/Certificate_pkcs12.p12" >> "$GITHUB_ENV"
           echo "SM_CLIENT_CERT_PASSWORD=${{ secrets.SM_CLIENT_CERT_PASSWORD }}" >> "$GITHUB_ENV"
           echo "SM_CODE_SIGNING_CERT_SHA1_HASH=${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}" >> "$GITHUB_ENV"
-          echo "Certificate file size: $(wc -c < /d/Certificate_pkcs12.p12) bytes"
 
-      - name: "Sign Windows binary (DigiCert KeyLocker)"
+      - name: "Install smctl and verify credentials"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
         uses: digicert/code-signing-software-trust-action@v1
         with:
-          input: ${{ env.BIN_NAME }}-${{ matrix.target }}.exe
-          keypair-alias: ${{ secrets.SM_KEYPAIR_ALIAS }}
           simple-signing-mode: true
+
+      - name: "Debug: verify smctl can authenticate"
+        if: runner.os == 'Windows' && env.SM_API_KEY != ''
+        shell: bash
+        run: |
+          echo "=== Certificate file check ==="
+          ls -la "${SM_CLIENT_CERT_FILE}" || echo "CERT FILE NOT FOUND!"
+          file "${SM_CLIENT_CERT_FILE}" || true
+          echo "=== smctl healthcheck ==="
+          smctl healthcheck
+          echo "=== smctl keypair list ==="
+          smctl keypair ls || true
+
+      - name: "Sign Windows binary (DigiCert KeyLocker)"
+        if: runner.os == 'Windows' && env.SM_API_KEY != ''
+        shell: bash
+        run: |
+          smctl sign --keypair-alias "${{ secrets.SM_KEYPAIR_ALIAS }}" --input "${{ env.BIN_NAME }}-${{ matrix.target }}.exe" --exit-non-zero-on-fail --failfast
 
       - name: "Verify Windows binary signature"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
