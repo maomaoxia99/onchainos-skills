@@ -33,24 +33,27 @@ jobs:
           SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
         shell: pwsh
         run: |
-          $certPath = "${{ runner.temp }}\Certificate_pkcs12.p12"
           $openssl = "C:\Program Files\Git\usr\bin\openssl.exe"
           $password = $env:SM_CLIENT_CERT_PASSWORD
+          $originalP12 = "${{ runner.temp }}\cert_original.p12"
 
           # Decode original p12
-          $originalP12 = "${{ runner.temp }}\cert_original.p12"
           [IO.File]::WriteAllBytes($originalP12, [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64))
 
-          # Convert to legacy 3DES format via openssl
-          $pemFile = "${{ runner.temp }}\cert_temp.pem"
-          & $openssl pkcs12 -in $originalP12 -out $pemFile -nodes -passin "pass:$password"
-          & $openssl pkcs12 -export -in $pemFile -out $certPath -passout "pass:$password" -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg SHA1
+          # Approach 1: PEM format (cert + key in one file)
+          $pemFile = "${{ runner.temp }}\Certificate.pem"
+          & $openssl pkcs12 -in $originalP12 -out $pemFile -nodes -passin "pass:$password" 2>&1
+          Write-Host "PEM file size: $((Get-Item $pemFile).Length) bytes"
 
-          Write-Host "Legacy p12 size: $((Get-Item $certPath).Length) bytes"
-          Remove-Item $originalP12, $pemFile -ErrorAction SilentlyContinue
+          # Approach 2: Also keep a legacy p12 as fallback
+          $legacyP12 = "${{ runner.temp }}\Certificate_pkcs12.p12"
+          & $openssl pkcs12 -export -in $pemFile -out $legacyP12 -passout "pass:$password" -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg SHA1 2>&1
+          Write-Host "Legacy p12 size: $((Get-Item $legacyP12).Length) bytes"
 
-          # Set ONLY the cert file path via GITHUB_ENV (password already in job env)
-          "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
+          Remove-Item $originalP12 -ErrorAction SilentlyContinue
+
+          # Try PEM first - smctl might support it
+          "SM_CLIENT_CERT_FILE=$pemFile" >> $env:GITHUB_ENV
 
       - name: "Install smctl"
         uses: digicert/code-signing-software-trust-action@v1
@@ -60,17 +63,29 @@ jobs:
       - name: "Verify and sign"
         shell: pwsh
         run: |
-          Write-Host "=== Env check ==="
-          Write-Host "SM_HOST: $env:SM_HOST"
-          Write-Host "SM_CLIENT_CERT_FILE: $env:SM_CLIENT_CERT_FILE"
-          Write-Host "SM_API_KEY length: $($env:SM_API_KEY.Length)"
-          Write-Host "SM_CLIENT_CERT_PASSWORD length: $($env:SM_CLIENT_CERT_PASSWORD.Length)"
-          Write-Host "Cert file size: $((Get-Item $env:SM_CLIENT_CERT_FILE).Length) bytes"
+          $pemFile = "${{ runner.temp }}\Certificate.pem"
+          $legacyP12 = "${{ runner.temp }}\Certificate_pkcs12.p12"
 
-          Write-Host "`n=== Healthcheck ==="
-          smctl healthcheck
+          Write-Host "=== Test 1: PEM format ==="
+          $env:SM_CLIENT_CERT_FILE = $pemFile
+          Write-Host "SM_CLIENT_CERT_FILE = $env:SM_CLIENT_CERT_FILE"
+          smctl healthcheck 2>&1 | Select-String "Authentication"
 
-          Write-Host "`n=== Sign (simple mode) ==="
+          Write-Host "`n=== Test 2: Legacy P12 format ==="
+          $env:SM_CLIENT_CERT_FILE = $legacyP12
+          Write-Host "SM_CLIENT_CERT_FILE = $env:SM_CLIENT_CERT_FILE"
+          smctl healthcheck 2>&1 | Select-String "Authentication"
+
+          Write-Host "`n=== Test 3: Original P12 (no password env, use saved creds) ==="
+          smctl credentials save $env:SM_API_KEY $env:SM_CLIENT_CERT_PASSWORD 2>&1
+          $env:SM_CLIENT_CERT_PASSWORD = ""
+          smctl healthcheck 2>&1 | Select-String "Authentication"
+
+          # Use whichever format shows 2FA, default to PEM
+          $env:SM_CLIENT_CERT_FILE = $pemFile
+          $env:SM_CLIENT_CERT_PASSWORD = "${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
+
+          Write-Host "`n=== Sign attempt ==="
           smctl sign --simple --keypair-alias "${{ secrets.SM_KEYPAIR_ALIAS }}" --input "${{ env.BIN_NAME }}-test.exe" -v 2>&1
 
       - name: "Verify signature"
