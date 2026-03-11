@@ -114,9 +114,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $certPath = "D:\Certificate_pkcs12.p12"
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String("${{ secrets.SM_CLIENT_CERT_FILE_B64 }}"))
-          echo "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
+          [IO.File]::WriteAllBytes("D:\Certificate_pkcs12.p12", [Convert]::FromBase64String("${{ secrets.SM_CLIENT_CERT_FILE_B64 }}"))
+          Write-Host "Certificate file size: $((Get-Item 'D:\Certificate_pkcs12.p12').Length) bytes"
 
       - name: "Sign Windows binary (DigiCert KeyLocker)"
         if: runner.os == 'Windows'
@@ -126,22 +125,9 @@ jobs:
           input: ${{ env.BIN_NAME }}-${{ matrix.target }}.exe
           keypair-alias: ${{ secrets.SM_KEYPAIR_ALIAS }}
         env:
-          SM_HOST: ${{ vars.SM_HOST }}
+          SM_HOST: https://one.digicert.com
           SM_API_KEY: ${{ secrets.SM_API_KEY }}
-          SM_CLIENT_CERT_FILE: ${{ env.SM_CLIENT_CERT_FILE }}
-          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-
-      - name: "Sign Windows binary (DigiCert KeyLocker)"
-        if: runner.os == 'Windows'
-        uses: digicert/code-signing-software-trust-action@v1
-        with:
-          simple-signing-mode: true
-          input: ${{ env.BIN_NAME }}-${{ matrix.target }}.exe
-          keypair-alias: ${{ secrets.SM_KEYPAIR_ALIAS }}
-        env:
-          SM_HOST: ${{ vars.SM_HOST }}
-          SM_API_KEY: ${{ secrets.SM_API_KEY }}
-          SM_CLIENT_CERT_FILE: D:\\Certificate_pkcs12.p12
+          SM_CLIENT_CERT_FILE: D:\Certificate_pkcs12.p12
           SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
 
       - uses: actions/upload-artifact@v4
