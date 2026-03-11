@@ -125,12 +125,14 @@ jobs:
         shell: pwsh
         run: |
           $certPath = "${{ runner.temp }}\Certificate_pkcs12.p12"
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String("${{ secrets.SM_CLIENT_CERT_FILE_B64 }}"))
+          $certBytes = [Convert]::FromBase64String("${{ secrets.SM_CLIENT_CERT_FILE_B64 }}")
+          [IO.File]::WriteAllBytes($certPath, $certBytes)
           Write-Host "Certificate file size: $((Get-Item $certPath).Length) bytes"
-          "SM_HOST=https://one.digicert.com" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
-          "SM_CLIENT_CERT_FILE=$certPath" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
-          "SM_CLIENT_CERT_PASSWORD=${{ secrets.SM_CLIENT_CERT_PASSWORD }}" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
-          "SM_CODE_SIGNING_CERT_SHA1_HASH=${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          # Use Add-Content with UTF8NoBOM to avoid BOM corruption
+          Add-Content $env:GITHUB_ENV "SM_HOST=https://one.digicert.com"
+          Add-Content $env:GITHUB_ENV "SM_CLIENT_CERT_FILE=$certPath"
+          Add-Content $env:GITHUB_ENV "SM_CLIENT_CERT_PASSWORD=${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
+          Add-Content $env:GITHUB_ENV "SM_CODE_SIGNING_CERT_SHA1_HASH=${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}"
 
       - name: "Install smctl and verify credentials"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
