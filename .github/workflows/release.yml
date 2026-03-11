@@ -126,15 +126,31 @@ jobs:
           SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
         shell: pwsh
         run: |
+          $password = "${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
           $certPath = "${{ runner.temp }}\Certificate_pkcs12.p12"
+
+          # Decode original p12
           $certBytes = [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64)
-          [IO.File]::WriteAllBytes($certPath, $certBytes)
-          $hash = (Get-FileHash $certPath -Algorithm SHA256).Hash
-          Write-Host "Certificate file size: $((Get-Item $certPath).Length) bytes"
-          Write-Host "Certificate SHA256: $hash"
+          $tempPath = "${{ runner.temp }}\cert_original.p12"
+          [IO.File]::WriteAllBytes($tempPath, $certBytes)
+
+          # Re-export using Windows crypto to produce smctl-compatible p12
+          $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
+            $tempPath, $password,
+            [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)
+          $reexported = $cert.Export(
+            [System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $password)
+          [IO.File]::WriteAllBytes($certPath, $reexported)
+          Remove-Item $tempPath
+
+          Write-Host "Original size: $($certBytes.Length) bytes"
+          Write-Host "Re-exported size: $($reexported.Length) bytes"
+          Write-Host "Re-exported SHA256: $((Get-FileHash $certPath -Algorithm SHA256).Hash)"
+          Write-Host "Subject: $($cert.Subject)"
+
           Add-Content $env:GITHUB_ENV "SM_HOST=https://one.digicert.com"
           Add-Content $env:GITHUB_ENV "SM_CLIENT_CERT_FILE=$certPath"
-          Add-Content $env:GITHUB_ENV "SM_CLIENT_CERT_PASSWORD=${{ secrets.SM_CLIENT_CERT_PASSWORD }}"
+          Add-Content $env:GITHUB_ENV "SM_CLIENT_CERT_PASSWORD=$password"
           Add-Content $env:GITHUB_ENV "SM_CODE_SIGNING_CERT_SHA1_HASH=${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}"
 
       - name: "Install smctl and verify credentials"
@@ -147,19 +163,44 @@ jobs:
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
         shell: pwsh
         run: |
-          Write-Host "Password length: $($env:SM_CLIENT_CERT_PASSWORD.Length)"
-          Write-Host "Password bytes: $([System.Text.Encoding]::UTF8.GetBytes($env:SM_CLIENT_CERT_PASSWORD).Length)"
-          Write-Host "Cert file size: $((Get-Item $env:SM_CLIENT_CERT_FILE).Length)"
+          Write-Host "=== Environment Variables ==="
+          Write-Host "SM_HOST: $env:SM_HOST"
+          Write-Host "SM_CLIENT_CERT_FILE: $env:SM_CLIENT_CERT_FILE"
+          Write-Host "SM_API_KEY length: $($env:SM_API_KEY.Length)"
+          Write-Host "SM_CLIENT_CERT_PASSWORD length: $($env:SM_CLIENT_CERT_PASSWORD.Length)"
+          Write-Host "SM_CODE_SIGNING_CERT_SHA1_HASH length: $($env:SM_CODE_SIGNING_CERT_SHA1_HASH.Length)"
+
+          Write-Host "`n=== Certificate File ==="
+          Write-Host "Cert file exists: $(Test-Path $env:SM_CLIENT_CERT_FILE)"
+          Write-Host "Cert file size: $((Get-Item $env:SM_CLIENT_CERT_FILE).Length) bytes"
           Write-Host "Cert SHA256: $((Get-FileHash $env:SM_CLIENT_CERT_FILE -Algorithm SHA256).Hash)"
-          # Try to load the p12 with the password to verify they match
+
+          Write-Host "`n=== P12 Load Test (PowerShell) ==="
           try {
-            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($env:SM_CLIENT_CERT_FILE, $env:SM_CLIENT_CERT_PASSWORD)
-            Write-Host "P12 load SUCCESS - Subject: $($cert.Subject)"
+            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
+              $env:SM_CLIENT_CERT_FILE, $env:SM_CLIENT_CERT_PASSWORD)
+            Write-Host "P12 load SUCCESS"
+            Write-Host "  Subject: $($cert.Subject)"
+            Write-Host "  Issuer: $($cert.Issuer)"
+            Write-Host "  Thumbprint: $($cert.Thumbprint)"
+            Write-Host "  NotBefore: $($cert.NotBefore)"
+            Write-Host "  NotAfter: $($cert.NotAfter)"
+            Write-Host "  HasPrivateKey: $($cert.HasPrivateKey)"
           } catch {
             Write-Host "P12 load FAILED: $_"
           }
-          Write-Host "=== smctl healthcheck ==="
+
+          Write-Host "`n=== P12 Format Check (certutil) ==="
+          certutil -dump $env:SM_CLIENT_CERT_FILE 2>&1 | Select-Object -First 30
+
+          Write-Host "`n=== smctl version ==="
+          smctl -v
+
+          Write-Host "`n=== smctl healthcheck ==="
           smctl healthcheck
+
+          Write-Host "`n=== smctl credentials help ==="
+          smctl credentials --help 2>&1 | Select-Object -First 20
 
       - name: "Sign Windows binary (DigiCert KeyLocker)"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
