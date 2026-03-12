@@ -92,12 +92,20 @@ The skills work together in typical DeFi flows:
 
 ## Install CLI
 
-### Shell Script (macOS / Linux)
+### macOS / Linux
 
 Auto-detects your platform, downloads the matching binary, verifies SHA256 checksum, and installs to `~/.local/bin`:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/okx/onchainos-skills/main/install.sh | sh
+```
+
+### Windows (PowerShell)
+
+Auto-detects architecture (x64/x86/ARM64), downloads the matching binary, verifies SHA256 checksum, and installs to `~\.local\bin`:
+
+```powershell
+irm https://raw.githubusercontent.com/okx/onchainos-skills/main/install.ps1 | iex
 ```
 
 ## API Key Security Notice & Disclaimer
