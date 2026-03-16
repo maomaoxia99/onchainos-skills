@@ -47,7 +47,7 @@ alloy-rlp = "0.3"
 alloy-network = "1"
 
 # Keyring
-keyring = { version = "3", features = ["apple-native"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 
 # Utils
 hex = "0.4"
