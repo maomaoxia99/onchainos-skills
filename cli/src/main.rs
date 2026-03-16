@@ -65,6 +65,11 @@ pub enum Commands {
         #[command(subcommand)]
         command: commands::portfolio::PortfolioCommand,
     },
+    /// Test keyring storage (set / getdata)
+    Test {
+        #[command(subcommand)]
+        command: commands::test::TestCommand,
+    },
     /// Start as MCP server (JSON-RPC 2.0 over stdio)
     Mcp {
         /// Backend service URL override
@@ -100,6 +105,7 @@ async fn run() {
         Commands::Swap { command } => commands::swap::execute(&ctx, command).await,
         Commands::Gateway { command } => commands::gateway::execute(&ctx, command).await,
         Commands::Portfolio { command } => commands::portfolio::execute(&ctx, command).await,
+        Commands::Test { command } => commands::test::execute(command).await,
         Commands::Mcp { base_url } => mcp::serve(base_url.as_deref()).await,
     };
 

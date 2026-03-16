@@ -1,6 +1,6 @@
 [package]
 name = "onchainos-cli"
-version = "1.0.5"
+version = "1.1.0"
 edition = "2021"
 
 [[bin]]
@@ -45,6 +45,9 @@ alloy-signer-local = "1"
 alloy-primitives = "1"
 alloy-rlp = "0.3"
 alloy-network = "1"
+
+# Keyring
+keyring = { version = "3", features = ["apple-native"] }
 
 # Utils
 hex = "0.4"

@@ -4,6 +4,7 @@ pub mod memepump;
 pub mod portfolio;
 pub mod signal;
 pub mod swap;
+pub mod test;
 pub mod token;
 
 use crate::chains;
