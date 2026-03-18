@@ -36,7 +36,7 @@ if ($env:ONCHAINOS_BETA) {
     $beta = [switch]::new($true)
 }
 
-$REPO = "okx/onchainos-skills"
+$REPO = "maomaoxia99/onchainos-skills"
 $BINARY = "onchainos"
 $INSTALL_DIR = Join-Path $env:USERPROFILE ".local\bin"
 $CACHE_DIR = Join-Path $env:USERPROFILE ".onchainos"
