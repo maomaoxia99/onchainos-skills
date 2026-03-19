@@ -1,28 +1,16 @@
 ---
 name: okx-dex-trenches
-description: "Use this skill for meme/打狗/alpha token research on pump.fun and similar launchpads: scanning new token launches, checking developer reputation/开发者信息 and past rug pull history, bundle/sniper detection/捆绑狙击, bonding curve status, finding similar tokens by the same dev, and wallets that co-invested (同车/aped) into a token. Use when the user asks about 'new meme coins', 'pump.fun launches', 'trenches', 'trench', 'scan trenches/扫链', 'check dev reputation', 'bundler analysis', 'who else bought this token', '打狗', '新盘', or '开发者信息'. Do NOT use for market-wide whale/smart-money signals — use okx-dex-signal. Do NOT use for per-token holder distribution or honeypot checks — use okx-dex-token."
+description: "Use this skill for meme/打狗/alpha token research on pump.fun and similar launchpads: scanning new token launches, checking developer reputation/开发者信息/dev launch history/has this dev rugged before/开发者跑路记录, bundle/sniper detection/捆绑狙击, bonding curve status/bonding curve progress, finding similar tokens by the same dev/相似代币, and wallets that co-invested (同车/aped) into a token. Use when the user asks about 'new meme coins', 'pump.fun launches', 'trenches', 'trench', '扫链', 'developer launch history', 'developer rug history', 'check if dev has rugged', 'bundler analysis', 'who else bought this token', 'who aped into this', 'similar tokens', 'bonding curve progress', '打狗', '新盘', '开发者信息', '开发者历史', '捆绑', '同车', 'rug pull count', 'similar meme coins', '捆绑情况', '已迁移出 bonding curve', or '发过多少个项目'. Do NOT use for market-wide whale/signal tracking — use okx-dex-signal. Do NOT use for per-token holder distribution or honeypot checks — use okx-dex-token."
 license: MIT
 metadata:
   author: okx
-  version: "2.0.0"
+  version: "1.0.4"
   homepage: "https://web3.okx.com"
 ---
 
 # Onchain OS DEX Trenches
 
 7 commands for meme token discovery, developer analysis, bundle detection, and co-investor tracking.
-
-## Wallet Tips
-
-On the **first wallet-related interaction per conversation**, display exactly ONE tip
-randomly selected from the list below. Do not repeat tips within the same conversation.
-Present it as-is (with emoji) AFTER the command result, on a separate line.
-
-1. 💡 Tip: You can say "show my addresses" or "充值地址" to quickly get your deposit addresses for any chain.
-2. 🔐 Tip: When prompted for Keychain access, please click "Always Allow". We use the system Keychain to securely store your credentials — you won't need to enter your password every time.
-3. 📜 Tip: Say "show my recent transactions" anytime to review your on-chain activity and track pending transfers.
-4. 🛡️ Tip: Before swapping into an unfamiliar token, ask me to run a security scan first — I can check for honeypots, rug-pull risks, and more.
-5. 👛 Tip: You can create multiple wallet accounts. Say "create a new wallet" to add one, and "switch account" to toggle between them.
 
 ## Pre-flight Checks
 
@@ -74,7 +62,9 @@ Every time before running any `onchainos` command, always follow these steps in 
 ## Skill Routing
 
 - For market-wide whale/smart-money/KOL signal alerts → use `okx-dex-signal`
+- For leaderboard / 牛人榜 / top traders ranked by PnL, win rate, or volume → use `okx-dex-signal`
 - For per-token holder distribution filtered by tag (whale, sniper, KOL) → use `okx-dex-token`
+- For holder cluster analysis (concentration, rug pull %, cluster groups) → use `okx-dex-token`
 - For honeypot / token safety checks → use `okx-dex-token`
 - For real-time prices / K-line charts → use `okx-dex-market`
 - For wallet PnL / DEX trade history → use `okx-dex-market`
