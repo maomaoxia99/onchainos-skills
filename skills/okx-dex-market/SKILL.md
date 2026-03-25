@@ -4,7 +4,7 @@ description: "Use this skill for on-chain market data: token prices/价格, K-li
 license: MIT
 metadata:
   author: okx
-  version: "2.1.0"
+  version: "1.0.4"
   homepage: "https://web3.okx.com"
 ---
 
@@ -221,7 +221,7 @@ The CLI accepts human-readable chain names (e.g., `ethereum`, `solana`, `xlayer`
 4. okx-dex-market   onchainos market kline --address <address> --chain solana        → K-line chart for visual trend
        ↓ user decides to buy
 5. okx-dex-swap     onchainos swap quote --from ... --to ... --amount ... --chain solana
-6. okx-dex-swap     onchainos swap swap --from ... --to ... --amount ... --chain solana --wallet <addr>
+6. okx-dex-swap     onchainos swap execute --from ... --to ... --amount ... --chain solana --wallet <addr>
 ```
 
 **Data handoff**: `tokenContractAddress` from step 1 is reused as `<address>` in steps 2-6.
