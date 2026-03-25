@@ -4,7 +4,7 @@ description: "Use this skill for smart-money/whale/KOL/大户 aggregated buy sig
 license: MIT
 metadata:
   author: okx
-  version: "2.2.0"
+  version: "1.0.4"
   homepage: "https://web3.okx.com"
 ---
 

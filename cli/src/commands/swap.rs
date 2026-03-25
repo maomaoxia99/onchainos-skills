@@ -774,9 +774,7 @@ async fn cmd_execute(
         if cfg!(feature = "debug-log") {
             eprintln!(
                 "[DEBUG][cmd_execute] spendable={}, amount={}, needs_approve={}",
-                spendable,
-                amount,
-                is_allowance_insufficient(spendable, amount)
+                spendable, amount, is_allowance_insufficient(spendable, amount)
             );
         }
 
