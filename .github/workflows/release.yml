@@ -108,7 +108,7 @@ jobs:
             }
           # ── macOS (ARM64 / x64) ──
           - { target: aarch64-apple-darwin, os: macos-latest }
-          - { target: x86_64-apple-darwin, os: macos-13 }
+          - { target: x86_64-apple-darwin, os: macos-latest }
           # ── Windows (x64 / x86 / ARM64) ──
           - { target: x86_64-pc-windows-msvc, os: windows-latest }
           - { target: i686-pc-windows-msvc, os: windows-latest }
