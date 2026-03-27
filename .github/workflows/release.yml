@@ -94,7 +94,7 @@ jobs:
       matrix:
         include:
           # ── Linux (x64 native, others via cross-compilation) ──
-          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
           - { target: i686-unknown-linux-gnu, os: ubuntu-latest, cross: true }
           - {
               target: aarch64-unknown-linux-gnu,
@@ -127,6 +127,10 @@ jobs:
         with:
           workspaces: ${{ env.CARGO_DIR }}
           key: ${{ matrix.target }}
+
+      - name: "Install musl toolchain (Linux musl targets)"
+        if: runner.os == 'Linux' && contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: "Install cross (Linux cross-compilation tool)"
         if: matrix.cross
