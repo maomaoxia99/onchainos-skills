@@ -4,7 +4,7 @@ description: "Use this skill to 'broadcast transaction', 'send tx', 'estimate ga
 license: MIT
 metadata:
   author: okx
-  version: "2.2.2"
+  version: "2.2.3"
   homepage: "https://web3.okx.com"
 ---
 
