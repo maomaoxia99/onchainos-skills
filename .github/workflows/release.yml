@@ -226,6 +226,13 @@ jobs:
           name: ${{ env.BIN_NAME }}-${{ matrix.target }}
           path: ${{ env.BIN_NAME }}-${{ matrix.target }}*
 
+      - name: "Upload gnu-named alias (musl builds only)"
+        if: contains(matrix.target, 'musl')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BIN_NAME }}-${{ matrix.target }}-gnu-alias
+          path: ${{ env.BIN_NAME }}-*-linux-gnu
+
   # ── Step 3: Generate SHA256 checksums ───────────────────────
   checksums:
     needs: [build]
