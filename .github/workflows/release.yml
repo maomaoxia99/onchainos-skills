@@ -93,8 +93,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ── Linux (x64 native, others via cross-compilation) ──
-          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest, cross: true }
+          # ── Linux (x64 musl static link — zero glibc dependency) ──
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04 }
           - { target: i686-unknown-linux-gnu, os: ubuntu-latest, cross: true }
           - {
               target: aarch64-unknown-linux-gnu,
@@ -128,6 +128,10 @@ jobs:
           workspaces: ${{ env.CARGO_DIR }}
           key: ${{ matrix.target }}
 
+      - name: "Install musl toolchain (Linux musl targets)"
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
       - name: "Install cross (Linux cross-compilation tool)"
         if: matrix.cross
         run: cargo install cross --git https://github.com/cross-rs/cross
@@ -158,6 +162,12 @@ jobs:
           fi
           cp "$src" "${BIN_NAME}-${TARGET}"
           chmod +x "${BIN_NAME}-${TARGET}"
+          # Create gnu-named alias for musl builds (install.sh expects -gnu name)
+          if echo "$TARGET" | grep -q 'musl'; then
+            gnu_name=$(echo "${BIN_NAME}-${TARGET}" | sed 's/musl/gnu/')
+            cp "${BIN_NAME}-${TARGET}" "$gnu_name"
+            chmod +x "$gnu_name"
+          fi
 
       - name: "Prepare artifact (Windows: rename .exe)"
         if: runner.os == 'Windows'
