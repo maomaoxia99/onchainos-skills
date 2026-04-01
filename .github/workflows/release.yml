@@ -1,9 +1,9 @@
 # ──────────────────────────────────────────────────────────────
 # Automated release pipeline
 # Trigger: workflow_dispatch with version input
-# Flow: validate → build all platforms (incl. macOS) →
-#        generate checksums → commit version update → tag →
-#        publish Release
+# Flow: validate → build all platforms (incl. macOS on GitHub
+#        runners) → generate checksums → commit version update →
+#        tag → publish Release
 # Artifacts: raw binaries (not tar.gz), with checksums.txt
 #
 # Beta releases:
@@ -33,6 +33,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_DIR: cli
   BIN_NAME: onchainos
+
 jobs:
   # ── Step 1: Validate version input ──────────────────────────
   validate:
@@ -82,7 +83,7 @@ jobs:
             exit 1
           fi
 
-  # ── Step 2: Build non-macOS binaries in parallel ────────────
+  # ── Step 2: Build all platform binaries in parallel ─────────
   build:
     needs: validate
     runs-on: ${{ matrix.os }}
@@ -107,7 +108,7 @@ jobs:
             }
           # ── macOS (ARM64 / x64) ──
           - { target: aarch64-apple-darwin, os: macos-latest }
-          - { target: x86_64-apple-darwin, os: macos-13 }
+          - { target: x86_64-apple-darwin, os: macos-latest }
           # ── Windows (x64 / x86 / ARM64) ──
           - { target: x86_64-pc-windows-msvc, os: windows-latest }
           - { target: i686-pc-windows-msvc, os: windows-latest }
