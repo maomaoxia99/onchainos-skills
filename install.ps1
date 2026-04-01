@@ -12,8 +12,8 @@
 # Behavior:
 #   - Default (stable): fetches latest stable release from GitHub,
 #     compares with local version, installs/upgrades if needed.
-#   - Beta: fetches all tags, finds the latest version (including
-#     pre-releases) by semver, and installs it.
+#   - Beta: fetches all tags, finds the latest beta (pre-release)
+#     version by semver, and installs it (ignores stable releases).
 #   - Caches the last check timestamp. Skips GitHub API calls if
 #     checked within the last 12 hours.
 #
@@ -126,20 +126,22 @@ function Get-LatestStableVersion {
     throw "Could not fetch latest version from GitHub. Check your network connection or install manually from https://github.com/${REPO}"
 }
 
-function Get-LatestVersionWithBeta {
+function Get-LatestBetaVersion {
     try {
         $response = Invoke-RestMethod -Uri "https://api.github.com/repos/${REPO}/tags?per_page=100" -TimeoutSec 10 -UseBasicParsing
         $best = $null
         foreach ($tag in $response) {
             $v = $tag.name -replace '^v', ''
             if (-not $v) { continue }
+            # Skip stable versions — only consider pre-releases (contain "-")
+            if ($v -notmatch '-') { continue }
             if (-not $best -or (Test-SemverGt $v $best)) {
                 $best = $v
             }
         }
         if ($best) { return $best }
     } catch {}
-    throw "Could not fetch tags from GitHub. Check your network connection or install manually from https://github.com/${REPO}"
+    throw "Could not fetch beta versions from GitHub. Check your network connection or install manually from https://github.com/${REPO}"
 }
 
 # ── Binary installer ─────────────────────────────────────────
@@ -214,7 +216,7 @@ function Main {
 
     if ($beta) {
         # ── Beta mode: find latest version including pre-releases ──
-        $targetVer = Get-LatestVersionWithBeta
+        $targetVer = Get-LatestBetaVersion
 
         if ($localVer -eq $targetVer) {
             Write-Cache

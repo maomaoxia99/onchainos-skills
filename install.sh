@@ -11,8 +11,8 @@ set -e
 # Behavior:
 #   - Default (stable): fetches latest stable release from GitHub,
 #     compares with local version, installs/upgrades if needed.
-#   - --beta: fetches all tags, finds the latest version (including
-#     pre-releases) by semver, and installs it.
+#   - --beta: fetches all tags, finds the latest beta (pre-release)
+#     version by semver, and installs it (ignores stable releases).
 #   - Caches the last check timestamp. Skips GitHub API calls if
 #     checked within the last 12 hours.
 #
@@ -142,8 +142,7 @@ get_latest_stable_version() {
 }
 
 # Fetch latest beta version from tags API.
-# Only considers tags with a pre-release suffix (e.g., -beta.0).
-# If no beta tags exist, falls back to the highest tag overall.
+# Only considers tags with a pre-release suffix (e.g., "-beta").
 get_latest_beta_version() {
   response=$(curl -sSL --max-time 10 "https://api.github.com/repos/${REPO}/tags?per_page=100" 2>/dev/null) || true
   versions=$(echo "$response" | grep -o '"name": *"v[^"]*"' | sed 's/.*"v\([^"]*\)".*/\1/')
@@ -154,33 +153,22 @@ get_latest_beta_version() {
     exit 1
   fi
 
-  # First pass: find highest beta version
   best=""
   for v in $versions; do
+    # Skip stable versions — only consider pre-releases (contain "-")
     case "$v" in
-      *-*) # has pre-release suffix (e.g., 2.0.0-beta.0)
-        if [ -z "$best" ]; then
-          best="$v"
-        elif semver_gt "$v" "$best"; then
-          best="$v"
-        fi
-        ;;
+      *-*) ;;
+      *) continue ;;
     esac
+    if [ -z "$best" ]; then
+      best="$v"
+    elif semver_gt "$v" "$best"; then
+      best="$v"
+    fi
   done
 
-  # Fallback: no beta tags found — use highest overall
   if [ -z "$best" ]; then
-    for v in $versions; do
-      if [ -z "$best" ]; then
-        best="$v"
-      elif semver_gt "$v" "$best"; then
-        best="$v"
-      fi
-    done
-  fi
-
-  if [ -z "$best" ]; then
-    echo "Error: no valid versions found in tags." >&2
+    echo "Error: no beta versions found in tags." >&2
     exit 1
   fi
 
@@ -290,11 +278,10 @@ main() {
   local_ver=$(get_local_version)
 
   if [ "$BETA_MODE" = true ]; then
-    # ── Beta mode: always install the latest beta version ──
+    # ── Beta mode: find latest version including pre-releases ──
     target_ver=$(get_latest_beta_version)
 
-    if [ -n "$local_ver" ] && [ "$local_ver" = "$target_ver" ]; then
-      echo "${BINARY} is already at beta version ${target_ver}."
+    if [ "$local_ver" = "$target_ver" ]; then
       write_cache
       return 0
     fi
