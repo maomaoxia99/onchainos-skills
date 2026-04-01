@@ -12,28 +12,79 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 
 use crate::file_keyring;
+use crate::wallet_store;
 
 const SERVICE: &str = "onchainos";
 const UNIFIED_KEY: &str = "agentic-wallet";
 
 // --------------- internal helpers ---------------
 
-/// Read the entire JSON blob from the single keyring entry.
-/// Public so callers can batch-read multiple keys in a single OS keyring access.
+/// Read the entire JSON blob from the keyring.
+/// Public so callers can batch-read multiple keys in a single access.
 ///
-/// Falls back to an encrypted local file if the OS keyring is unavailable.
+/// Priority: OS keyring first (macOS/Windows always work); fall back to
+/// file_keyring only when OS returns empty or errors (headless Linux, Docker).
+/// This keeps macOS/Windows behaviour identical to the original code —
+/// file_keyring is never touched when the OS keyring is healthy.
+///
+/// If file_keyring also fails (corrupted / undecryptable), we purge stale
+/// data and return Ok(empty) so callers like `store()` can still write
+/// fresh credentials — breaking the "expired → re-login → still expired"
+/// loop.
 pub fn read_blob() -> Result<HashMap<String, String>> {
+    // 1. Try OS keyring (works on macOS/Windows; may work on some Linux desktops).
     match os_read_blob() {
+        Ok(map) if !map.is_empty() => return Ok(map),
+        // NoEntry or empty — fall through to file_keyring.
+        Ok(_) => {}
+        // OS keyring error (no Secret Service, D-Bus timeout, etc.)
+        Err(e) => {
+            eprintln!("Warning: OS keyring read failed ({e}), trying file fallback");
+        }
+    }
+
+    // 2. OS keyring empty or unavailable — try file_keyring.
+    match file_keyring::read_blob() {
         Ok(map) => Ok(map),
-        Err(_) => file_keyring::read_blob(),
+        Err(e) => {
+            // Corrupted or undecryptable — purge and return empty so the
+            // caller (e.g. store() during login) can write fresh credentials.
+            eprintln!(
+                "Warning: failed to read credentials ({}). \
+                 Clearing corrupted data — please login again: onchainos wallet login",
+                e
+            );
+            purge_stale_credentials();
+            Ok(HashMap::new())
+        }
     }
 }
 
-/// Write the entire JSON blob back to the single keyring entry.
+/// Remove all credential artifacts (OS keyring, file keyring, session.json)
+/// so the user can start fresh with `onchainos wallet login`.
+fn purge_stale_credentials() {
+    if let Err(e) = os_clear_all() {
+        eprintln!("Warning: failed to clear OS keyring: {e}");
+    }
+    if let Err(e) = file_keyring::clear_all() {
+        eprintln!("Warning: failed to clear file keyring: {e}");
+    }
+    if let Err(e) = wallet_store::delete_session() {
+        eprintln!("Warning: failed to delete session.json: {e}");
+    }
+}
+
+/// Write the entire JSON blob to the keyring.
+///
+/// Priority: OS keyring first; fall back to file_keyring only on failure.
+/// macOS/Windows never touch file_keyring when the OS backend is healthy.
 fn write_blob(map: &HashMap<String, String>) -> Result<()> {
     match os_write_blob(map) {
         Ok(()) => Ok(()),
-        Err(_) => file_keyring::write_blob(map),
+        Err(e) => {
+            eprintln!("Warning: OS keyring write failed ({e}), using file fallback");
+            file_keyring::write_blob(map)
+        }
     }
 }
 
