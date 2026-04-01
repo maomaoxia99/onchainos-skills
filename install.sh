@@ -22,7 +22,7 @@ set -e
 #   Windows: see install.ps1 (PowerShell)
 # ──────────────────────────────────────────────────────────────
 
-REPO="maomaoxia99/onchainos-skills"
+REPO="okx/onchainos-skills"
 BINARY="onchainos"
 INSTALL_DIR="$HOME/.local/bin"
 CACHE_DIR="$HOME/.onchainos"
@@ -141,9 +141,10 @@ get_latest_stable_version() {
   echo "$ver"
 }
 
-# Fetch latest version including betas from tags API.
-# Iterates all tags and returns the highest by semver (could be stable or beta).
-get_latest_version_with_beta() {
+# Fetch latest beta version from tags API.
+# Only considers tags with a pre-release suffix (e.g., -beta.0).
+# If no beta tags exist, falls back to the highest tag overall.
+get_latest_beta_version() {
   response=$(curl -sSL --max-time 10 "https://api.github.com/repos/${REPO}/tags?per_page=100" 2>/dev/null) || true
   versions=$(echo "$response" | grep -o '"name": *"v[^"]*"' | sed 's/.*"v\([^"]*\)".*/\1/')
 
@@ -153,14 +154,30 @@ get_latest_version_with_beta() {
     exit 1
   fi
 
+  # First pass: find highest beta version
   best=""
   for v in $versions; do
-    if [ -z "$best" ]; then
-      best="$v"
-    elif semver_gt "$v" "$best"; then
-      best="$v"
-    fi
+    case "$v" in
+      *-*) # has pre-release suffix (e.g., 2.0.0-beta.0)
+        if [ -z "$best" ]; then
+          best="$v"
+        elif semver_gt "$v" "$best"; then
+          best="$v"
+        fi
+        ;;
+    esac
   done
+
+  # Fallback: no beta tags found — use highest overall
+  if [ -z "$best" ]; then
+    for v in $versions; do
+      if [ -z "$best" ]; then
+        best="$v"
+      elif semver_gt "$v" "$best"; then
+        best="$v"
+      fi
+    done
+  fi
 
   if [ -z "$best" ]; then
     echo "Error: no valid versions found in tags." >&2
@@ -273,10 +290,11 @@ main() {
   local_ver=$(get_local_version)
 
   if [ "$BETA_MODE" = true ]; then
-    # ── Beta mode: find latest version including pre-releases ──
-    target_ver=$(get_latest_version_with_beta)
+    # ── Beta mode: always install the latest beta version ──
+    target_ver=$(get_latest_beta_version)
 
-    if [ "$local_ver" = "$target_ver" ]; then
+    if [ -n "$local_ver" ] && [ "$local_ver" = "$target_ver" ]; then
+      echo "${BINARY} is already at beta version ${target_ver}."
       write_cache
       return 0
     fi
