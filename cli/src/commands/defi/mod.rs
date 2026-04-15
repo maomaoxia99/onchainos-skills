@@ -15,6 +15,10 @@ use crate::output;
 
 #[derive(Subcommand)]
 pub enum DefiCommand {
+    /// Get supported chains for DeFi
+    SupportChains,
+    /// Get supported platforms for DeFi
+    SupportPlatforms,
     /// List all DeFi products (no filters, paginated)
     List {
         /// Page number (min 1, page size fixed at 20)
@@ -167,6 +171,39 @@ pub enum DefiCommand {
         tick_upper: Option<i64>,
     },
 
+    /// Get historical APY chart data for a DeFi product
+    RateChart {
+        /// Investment ID
+        #[arg(long)]
+        investment_id: String,
+        /// Time range: DAY (V3 only), WEEK (default), MONTH, SEASON, YEAR
+        #[arg(long)]
+        time_range: Option<String>,
+    },
+
+    /// Get historical TVL chart data for a DeFi product
+    TvlChart {
+        /// Investment ID
+        #[arg(long)]
+        investment_id: String,
+        /// Time range: DAY (V3 only), WEEK (default), MONTH, SEASON, YEAR
+        #[arg(long)]
+        time_range: Option<String>,
+    },
+
+    /// Get V3 Pool depth or price history chart (V3 Pool only)
+    DepthPriceChart {
+        /// Investment ID
+        #[arg(long)]
+        investment_id: String,
+        /// Chart type: DEPTH (default) or PRICE
+        #[arg(long)]
+        chart_type: Option<String>,
+        /// Time range (only for PRICE mode): DAY (default), WEEK. Ignored in DEPTH mode
+        #[arg(long)]
+        time_range: Option<String>,
+    },
+
     /// High-level invest: resolve token, convert amount, build calldata
     Invest {
         /// Investment ID from search results
@@ -287,6 +324,12 @@ pub enum DefiCommand {
 pub async fn execute(ctx: &Context, cmd: DefiCommand) -> Result<()> {
     let client = ctx.client_async().await?;
     match cmd {
+        DefiCommand::SupportChains => {
+            output::success(fetch_chains(&client).await?);
+        }
+        DefiCommand::SupportPlatforms => {
+            output::success(fetch_protocols(&client).await?);
+        }
         DefiCommand::List { page_num } => {
             output::success(fetch_search(&client, None, None, None, None, page_num).await?);
         }
@@ -539,6 +582,35 @@ pub async fn execute(ctx: &Context, cmd: DefiCommand) -> Result<()> {
             }
 
             output::success(output);
+        }
+        DefiCommand::RateChart {
+            investment_id,
+            time_range,
+        } => {
+            output::success(
+                fetch_rate_chart(&client, &investment_id, time_range.as_deref()).await?,
+            );
+        }
+        DefiCommand::TvlChart {
+            investment_id,
+            time_range,
+        } => {
+            output::success(fetch_tvl_chart(&client, &investment_id, time_range.as_deref()).await?);
+        }
+        DefiCommand::DepthPriceChart {
+            investment_id,
+            chart_type,
+            time_range,
+        } => {
+            output::success(
+                fetch_depth_price_chart(
+                    &client,
+                    &investment_id,
+                    chart_type.as_deref(),
+                    time_range.as_deref(),
+                )
+                .await?,
+            );
         }
         DefiCommand::Invest {
             investment_id,

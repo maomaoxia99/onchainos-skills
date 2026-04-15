@@ -5,6 +5,20 @@ use crate::client::ApiClient;
 
 use super::helpers::convert_minimal_to_decimal;
 
+/// GET /api/v6/defi/product/supported-chains
+pub async fn fetch_chains(client: &ApiClient) -> Result<Value> {
+    client
+        .get("/api/v6/defi/product/supported-chains", &[])
+        .await
+}
+
+/// GET /api/v6/defi/product/supported-platforms
+pub async fn fetch_protocols(client: &ApiClient) -> Result<Value> {
+    client
+        .get("/api/v6/defi/product/supported-platforms", &[])
+        .await
+}
+
 /// POST /api/v6/defi/product/search
 pub async fn fetch_search(
     client: &ApiClient,
@@ -216,6 +230,51 @@ pub async fn fetch_calculate_entry(
     }
     client
         .post("/api/v6/defi/calculator/enter/info", &body)
+        .await
+}
+
+/// GET /api/v6/defi/product/rate/chart
+pub async fn fetch_rate_chart(
+    client: &ApiClient,
+    investment_id: &str,
+    time_range: Option<&str>,
+) -> Result<Value> {
+    let mut params = vec![("investmentId", investment_id)];
+    if let Some(tr) = time_range {
+        params.push(("timeRange", tr));
+    }
+    client.get("/api/v6/defi/product/rate/chart", &params).await
+}
+
+/// GET /api/v6/defi/product/tvl/chart
+pub async fn fetch_tvl_chart(
+    client: &ApiClient,
+    investment_id: &str,
+    time_range: Option<&str>,
+) -> Result<Value> {
+    let mut params = vec![("investmentId", investment_id)];
+    if let Some(tr) = time_range {
+        params.push(("timeRange", tr));
+    }
+    client.get("/api/v6/defi/product/tvl/chart", &params).await
+}
+
+/// GET /api/v6/defi/product/depth-price/chart
+pub async fn fetch_depth_price_chart(
+    client: &ApiClient,
+    investment_id: &str,
+    chart_type: Option<&str>,
+    time_range: Option<&str>,
+) -> Result<Value> {
+    let mut params = vec![("investmentId", investment_id)];
+    if let Some(ct) = chart_type {
+        params.push(("chartType", ct));
+    }
+    if let Some(tr) = time_range {
+        params.push(("timeRange", tr));
+    }
+    client
+        .get("/api/v6/defi/product/depth-price/chart", &params)
         .await
 }
 

@@ -30,7 +30,7 @@ pub enum WalletCommand {
     Status,
     /// Show wallet addresses grouped by chain category (XLayer, EVM, Solana)
     Addresses {
-        /// Filter by chain ID (e.g. "1" for Ethereum, "501" for Solana, "196" for XLayer)
+        /// Chain name or ID (e.g. "ethereum" or "1", "solana" or "501", "xlayer" or "196")
         #[arg(long)]
         chain: Option<String>,
     },
@@ -43,7 +43,7 @@ pub enum WalletCommand {
         /// Query all accounts' assets (uses accountId list)
         #[arg(long)]
         all: bool,
-        /// Filter by chain ID (e.g. "1" for Ethereum, "501" for Solana, "196" for XLayer)
+        /// Chain name or ID (e.g. "ethereum" or "1", "solana" or "501", "xlayer" or "196")
         #[arg(long)]
         chain: Option<String>,
         /// Filter by token contract address. Requires --chain.
@@ -64,8 +64,8 @@ pub enum WalletCommand {
         readable_amount: Option<String>,
         /// Recipient address
         #[arg(long)]
-        receipt: String,
-        /// Chain ID (e.g. "1" for Ethereum, "501" for Solana, "56" for BSC)
+        recipient: String,
+        /// Chain name or ID (e.g. "ethereum" or "1", "solana" or "501", "bsc" or "56")
         #[arg(long)]
         chain: String,
         /// Sender address (optional — defaults to selectedAccountId)
@@ -83,7 +83,7 @@ pub enum WalletCommand {
         /// Account ID (defaults to current selectedAccountId)
         #[arg(long)]
         account_id: Option<String>,
-        /// Chain ID (e.g. "1" for Ethereum, "501" for Solana). Resolved to chainIndex internally.
+        /// Chain name or ID (e.g. "ethereum" or "1", "solana" or "501"). Resolved to chainIndex internally.
         #[arg(long)]
         chain: Option<String>,
         /// Address (required when --tx-hash is present for detail query)
@@ -119,7 +119,7 @@ pub enum WalletCommand {
         /// Message to sign (arbitrary string for personal, JSON string for eip712)
         #[arg(long)]
         message: String,
-        /// Chain ID (e.g. "1" for Ethereum, "501" for Solana, "56" for BSC)
+        /// Chain name or ID (e.g. "ethereum" or "1", "solana" or "501", "bsc" or "56")
         #[arg(long)]
         chain: String,
         /// Sender address (the address whose private key is used to sign)
@@ -134,7 +134,7 @@ pub enum WalletCommand {
         /// Contract address to interact with
         #[arg(long)]
         to: String,
-        /// Chain ID (e.g. "1" for Ethereum, "501" for Solana, "56" for BSC)
+        /// Chain name or ID (e.g. "ethereum" or "1", "solana" or "501", "bsc" or "56")
         #[arg(long)]
         chain: String,
         /// Native token amount in minimal units — whole number, no decimals (default "0")
@@ -189,7 +189,10 @@ async fn resolve_send_amount(
             bail!("--amt must be a whole number in minimal units (no decimals)");
         }
         if !raw.chars().all(|c| c.is_ascii_digit()) {
-            bail!("--amt must be a whole number in minimal units, got \"{}\"", raw);
+            bail!(
+                "--amt must be a whole number in minimal units, got \"{}\"",
+                raw
+            );
         }
         if raw.chars().all(|c| c == '0') {
             bail!("--amt must be greater than zero");
@@ -210,9 +213,9 @@ async fn resolve_send_amount(
             None => {
                 // Native token — decimals are fixed per chain
                 match chain {
-                    "501" => 9,  // SOL (lamports)
-                    "784" => 9,  // SUI (MIST)
-                    _ => 18,     // All EVM native tokens (ETH, BNB, MATIC, OKB, AVAX, …)
+                    "501" => 9, // SOL (lamports)
+                    "784" => 9, // SUI (MIST)
+                    _ => 18,    // All EVM native tokens (ETH, BNB, MATIC, OKB, AVAX, …)
                 }
             }
             Some(token_addr) => {
@@ -230,14 +233,16 @@ async fn resolve_send_amount(
                         anyhow::anyhow!(
                             "Failed to fetch token decimals for {}: {}. \
                              Use --amt with raw minimal units instead.",
-                            token_addr, e
+                            token_addr,
+                            e
                         )
                     })?;
                 let info_arr = info.as_array().filter(|a| !a.is_empty()).ok_or_else(|| {
                     anyhow::anyhow!(
                         "Token not found for address {} on chain {}. \
                          Verify the address is correct. Use --amt with raw minimal units instead.",
-                        token_addr, chain
+                        token_addr,
+                        chain
                     )
                 })?;
                 match &info_arr[0]["decimal"] {
@@ -287,12 +292,13 @@ pub async fn execute(command: WalletCommand) -> Result<()> {
         WalletCommand::Send {
             amt,
             readable_amount,
-            receipt,
+            recipient,
             chain,
             from,
             contract_token,
             force,
         } => {
+            let chain = crate::chains::resolve_chain(&chain);
             let raw_amt = resolve_send_amount(
                 amt.as_deref(),
                 readable_amount.as_deref(),
@@ -302,7 +308,7 @@ pub async fn execute(command: WalletCommand) -> Result<()> {
             .await?;
             super::transfer::cmd_send(
                 &raw_amt,
-                &receipt,
+                &recipient,
                 &chain,
                 from.as_deref(),
                 contract_token.as_deref(),

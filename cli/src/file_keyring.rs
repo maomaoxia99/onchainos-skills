@@ -199,6 +199,7 @@ fn ensure_file_permissions(path: &std::path::Path) -> Result<()> {
 fn ensure_file_permissions(_path: &std::path::Path) -> Result<()> {
     Ok(())
 }
+
 /// Check file permissions before reading; auto-fix if possible.
 fn check_and_fix_permissions(path: &std::path::Path) -> Result<()> {
     ensure_file_permissions(path)
@@ -266,6 +267,7 @@ fn try_decrypt(
             .decrypt(nonce, ciphertext)
             .map_err(|_| anyhow::anyhow!("decryption failed"))?,
     );
+
     let map: HashMap<String, String> =
         serde_json::from_slice(&plaintext).context("failed to parse decrypted keyring blob")?;
     Ok(map)
