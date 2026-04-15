@@ -11,6 +11,7 @@ mod home;
 mod keyring_store;
 mod mcp;
 mod output;
+pub mod doh;
 mod wallet_api;
 mod wallet_store;
 mod watch;
