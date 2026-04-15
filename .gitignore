@@ -33,7 +33,6 @@ DerivedData/
 
 # onchainOS local config
 .onchainos/
-.watch/
 
 # Logs
 *.log
@@ -47,6 +46,9 @@ yarn-error.log*
 # Claude Code
 **/settings.local.json
 .mcp.json
+
+# Superpowers generated docs (local only)
+docs/superpowers/
 
 # AI Assistant directories (auto-generated)
 .cursor
