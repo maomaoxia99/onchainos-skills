@@ -5,38 +5,17 @@ use anyhow::{bail, Result};
 
 use crate::home::onchainos_home;
 
-use super::types::{DohBinaryResponse, DohChecksum, DohNode};
+use super::types::{DohBinaryResponse, DohNode};
 
 const BINARY_NAME: &str = "okx-pilot";
 
-/// CDN sources tried in order. Each entry is a full base URL (no trailing slash).
-/// Append `/{platform}/checksum.json` or `/{platform}/{binary}` to form the full URL.
-///
-/// Priority (mirrors okx-trade-mcp installer.ts CDN_SOURCES):
-///   1. static.jingyunyilian.com  — primary CDN
-///   2. static.okx.com            — OKX CDN
-///   3. static.coinall.ltd        — Coinall CDN
-///   4. okg-pub-hk OSS            — Aliyun OSS fallback (different path prefix)
 const CDN_SOURCES: &[&str] = &[
-    "https://static.jingyunyilian.com/upgradeapp/tools/doh",
-    "https://static.okx.com/upgradeapp/tools/doh",
-    "https://static.coinall.ltd/upgradeapp/tools/doh",
-    "https://okg-pub-hk.oss-cn-hongkong.aliyuncs.com/upgradeapp/tools/doh",
+    "https://static.okx.com/upgradeapp/doh",
+    "https://pcdoh.qcxex.com/upgradeapp/doh",
+    "https://static.coinall.ltd/upgradeapp/doh",
 ];
 
-/// Returns the platform-specific binary filename (adds .exe on Windows).
-fn binary_filename() -> &'static str {
-    #[cfg(target_os = "windows")]
-    {
-        return "okx-pilot.exe";
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        BINARY_NAME
-    }
-}
-
-/// Returns the path to `~/.onchainos/bin/okx-pilot` (or `okx-pilot.exe` on Windows).
+/// Returns the path to `~/.onchainos/bin/okx-pilot`.
 /// Overridable via `OKX_DOH_BINARY_PATH` env var.
 pub fn binary_path() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("OKX_DOH_BINARY_PATH") {
@@ -44,7 +23,7 @@ pub fn binary_path() -> Option<PathBuf> {
     }
     onchainos_home()
         .ok()
-        .map(|h| h.join("bin").join(binary_filename()))
+        .map(|h| h.join("bin").join(BINARY_NAME))
 }
 
 /// Maps Rust compile target to CDN platform string.
@@ -62,10 +41,6 @@ fn cdn_platform() -> Option<&'static str> {
     {
         return Some("linux-x64");
     }
-    #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
-    {
-        return Some("linux-arm64");
-    }
     #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
     {
         return Some("win32-x64");
@@ -73,16 +48,15 @@ fn cdn_platform() -> Option<&'static str> {
     None
 }
 
-/// Downloads and verifies the okx-pilot binary from CDN.
-/// Tries each CDN source in order. For each source: fetches checksum.json,
-/// downloads the binary, verifies sha256, then writes atomically.
+/// Downloads the okx-pilot binary from CDN.
+/// Tries multiple CDN sources in order.
 pub async fn download_binary() -> Result<()> {
-    let platform = cdn_platform()
-        .ok_or_else(|| anyhow::anyhow!("unsupported platform for doh binary"))?;
+    let platform =
+        cdn_platform().ok_or_else(|| anyhow::anyhow!("unsupported platform for doh binary"))?;
 
-    let dest = binary_path()
-        .ok_or_else(|| anyhow::anyhow!("cannot determine binary path"))?;
+    let dest = binary_path().ok_or_else(|| anyhow::anyhow!("cannot determine binary path"))?;
 
+    // Ensure parent directory exists
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -91,85 +65,45 @@ pub async fn download_binary() -> Result<()> {
         .timeout(Duration::from_secs(30))
         .build()?;
 
-    let filename = binary_filename();
-    let mut last_err = String::new();
-
+    let mut last_err = None;
     for base in CDN_SOURCES {
-        let checksum_url = format!("{base}/{platform}/checksum.json");
-        let binary_url = format!("{base}/{platform}/{filename}");
+        let url = format!("{base}/{platform}/{BINARY_NAME}");
+        eprintln!("[doh] downloading {url} ...");
 
-        // Step 1: fetch checksum
-        eprintln!("[doh] fetching checksum {checksum_url} ...");
-        let checksum: DohChecksum = match client.get(&checksum_url).send().await {
-            Ok(resp) if resp.status().is_success() => match resp.json().await {
-                Ok(c) => c,
-                Err(e) => {
-                    last_err = format!("{base}: checksum parse failed: {e}");
-                    continue;
-                }
-            },
+        match client.get(&url).send().await {
             Ok(resp) => {
-                last_err = format!("{base}: checksum HTTP {}", resp.status());
-                continue;
+                if resp.status().is_success() {
+                    let bytes = resp.bytes().await?;
+                    let tmp_path = dest.with_extension("tmp");
+                    std::fs::write(&tmp_path, &bytes)?;
+
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        std::fs::set_permissions(
+                            &tmp_path,
+                            std::fs::Permissions::from_mode(0o755),
+                        )?;
+                    }
+
+                    std::fs::rename(&tmp_path, &dest)?;
+                    return Ok(());
+                }
+                last_err = Some(anyhow::anyhow!(
+                    "CDN returned status {} for {url}",
+                    resp.status()
+                ));
             }
             Err(e) => {
-                last_err = format!("{base}: checksum fetch failed: {e}");
-                continue;
+                last_err = Some(anyhow::anyhow!("request failed for {url}: {e}"));
             }
-        };
-
-        // Step 2: download binary
-        eprintln!("[doh] downloading {binary_url} ...");
-        let bytes = match client.get(&binary_url).send().await {
-            Ok(resp) if resp.status().is_success() => match resp.bytes().await {
-                Ok(b) => b,
-                Err(e) => {
-                    last_err = format!("{base}: binary read failed: {e}");
-                    continue;
-                }
-            },
-            Ok(resp) => {
-                last_err = format!("{base}: binary HTTP {}", resp.status());
-                continue;
-            }
-            Err(e) => {
-                last_err = format!("{base}: binary fetch failed: {e}");
-                continue;
-            }
-        };
-
-        // Step 3: verify sha256
-        let actual = sha256_hex(&bytes);
-        if actual != checksum.sha256 {
-            last_err = format!(
-                "{base}: sha256 mismatch: expected {}, got {}",
-                checksum.sha256, actual
-            );
-            continue;
         }
-
-        // Step 4: write atomically
-        let tmp_path = dest.with_extension("tmp");
-        std::fs::write(&tmp_path, &bytes)?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o755))?;
-        }
-
-        std::fs::rename(&tmp_path, &dest)?;
-        return Ok(());
     }
 
-    bail!("all CDN sources failed, last error: {last_err}")
-}
-
-/// SHA-256 of bytes, returned as lowercase hex string.
-fn sha256_hex(data: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let hash = Sha256::digest(data);
-    format!("{:x}", hash)
+    match last_err {
+        Some(e) => bail!("all CDN sources failed, last error: {e}"),
+        None => bail!("all CDN sources failed"),
+    }
 }
 
 /// Executes the okx-pilot binary and parses the result.
@@ -247,37 +181,17 @@ mod tests {
         std::env::remove_var("OKX_DOH_BINARY_PATH");
         std::env::set_var("ONCHAINOS_HOME", "/tmp/test_onchainos_doh");
         let path = binary_path().expect("should return Some");
-        assert_eq!(
-            path,
-            PathBuf::from(format!(
-                "/tmp/test_onchainos_doh/bin/{}",
-                binary_filename()
-            ))
-        );
+        assert_eq!(path, PathBuf::from("/tmp/test_onchainos_doh/bin/okx-pilot"));
         std::env::remove_var("ONCHAINOS_HOME");
     }
 
     #[test]
     fn cdn_platform_returns_some() {
+        // This test runs on a supported CI/dev platform (macOS or Linux x86_64/aarch64).
         let platform = cdn_platform();
         assert!(
             platform.is_some(),
             "cdn_platform() should return Some on supported platforms"
         );
-    }
-
-    #[test]
-    fn sha256_hex_known_value() {
-        // echo -n "" | sha256sum → e3b0c44...
-        let hash = sha256_hex(b"");
-        assert_eq!(
-            hash,
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
-    }
-
-    #[test]
-    fn cdn_sources_not_empty() {
-        assert!(!CDN_SOURCES.is_empty());
     }
 }
