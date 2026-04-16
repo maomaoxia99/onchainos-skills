@@ -11,8 +11,8 @@ set -e
 # Behavior:
 #   - Default (stable): fetches latest stable release from GitHub,
 #     compares with local version, installs/upgrades if needed.
-#   - --beta: fetches all tags, finds the latest beta (pre-release)
-#     version by semver, and installs it (ignores stable releases).
+#   - --beta: fetches all tags, finds the latest version (including
+#     pre-releases) by semver, and installs it.
 #   - Caches the last check timestamp. Skips GitHub API calls if
 #     checked within the last 12 hours.
 #
@@ -22,7 +22,7 @@ set -e
 #   Windows: see install.ps1 (PowerShell)
 # ──────────────────────────────────────────────────────────────
 
-REPO="maomaoxia99/onchainos-skills"
+REPO="okx/onchainos-skills"
 BINARY="onchainos"
 INSTALL_DIR="$HOME/.local/bin"
 CACHE_DIR="$HOME/.onchainos"
@@ -141,9 +141,9 @@ get_latest_stable_version() {
   echo "$ver"
 }
 
-# Fetch latest beta version from tags API.
-# Only considers tags with a pre-release suffix (e.g., "-beta").
-get_latest_beta_version() {
+# Fetch latest version including betas from tags API.
+# Iterates all tags and returns the highest by semver (could be stable or beta).
+get_latest_version_with_beta() {
   response=$(curl -sSL --max-time 10 "https://api.github.com/repos/${REPO}/tags?per_page=100" 2>/dev/null) || true
   versions=$(echo "$response" | grep -o '"name": *"v[^"]*"' | sed 's/.*"v\([^"]*\)".*/\1/')
 
@@ -155,11 +155,6 @@ get_latest_beta_version() {
 
   best=""
   for v in $versions; do
-    # Skip stable versions — only consider pre-releases (contain "-")
-    case "$v" in
-      *-*) ;;
-      *) continue ;;
-    esac
     if [ -z "$best" ]; then
       best="$v"
     elif semver_gt "$v" "$best"; then
@@ -168,7 +163,7 @@ get_latest_beta_version() {
   done
 
   if [ -z "$best" ]; then
-    echo "Error: no beta versions found in tags." >&2
+    echo "Error: no valid versions found in tags." >&2
     exit 1
   fi
 
@@ -279,7 +274,7 @@ main() {
 
   if [ "$BETA_MODE" = true ]; then
     # ── Beta mode: find latest version including pre-releases ──
-    target_ver=$(get_latest_beta_version)
+    target_ver=$(get_latest_version_with_beta)
 
     if [ "$local_ver" = "$target_ver" ]; then
       write_cache

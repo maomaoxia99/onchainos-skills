@@ -12,8 +12,8 @@
 # Behavior:
 #   - Default (stable): fetches latest stable release from GitHub,
 #     compares with local version, installs/upgrades if needed.
-#   - Beta: fetches all tags, finds the latest beta (pre-release)
-#     version by semver, and installs it (ignores stable releases).
+#   - Beta: fetches all tags, finds the latest version (including
+#     pre-releases) by semver, and installs it.
 #   - Caches the last check timestamp. Skips GitHub API calls if
 #     checked within the last 12 hours.
 #
@@ -36,7 +36,7 @@ if ($env:ONCHAINOS_BETA) {
     $beta = [switch]::new($true)
 }
 
-$REPO = "maomaoxia99/onchainos-skills"
+$REPO = "okx/onchainos-skills"
 $BINARY = "onchainos"
 $INSTALL_DIR = Join-Path $env:USERPROFILE ".local\bin"
 $CACHE_DIR = Join-Path $env:USERPROFILE ".onchainos"
@@ -126,22 +126,20 @@ function Get-LatestStableVersion {
     throw "Could not fetch latest version from GitHub. Check your network connection or install manually from https://github.com/${REPO}"
 }
 
-function Get-LatestBetaVersion {
+function Get-LatestVersionWithBeta {
     try {
         $response = Invoke-RestMethod -Uri "https://api.github.com/repos/${REPO}/tags?per_page=100" -TimeoutSec 10 -UseBasicParsing
         $best = $null
         foreach ($tag in $response) {
             $v = $tag.name -replace '^v', ''
             if (-not $v) { continue }
-            # Skip stable versions — only consider pre-releases (contain "-")
-            if ($v -notmatch '-') { continue }
             if (-not $best -or (Test-SemverGt $v $best)) {
                 $best = $v
             }
         }
         if ($best) { return $best }
     } catch {}
-    throw "Could not fetch beta versions from GitHub. Check your network connection or install manually from https://github.com/${REPO}"
+    throw "Could not fetch tags from GitHub. Check your network connection or install manually from https://github.com/${REPO}"
 }
 
 # ── Binary installer ─────────────────────────────────────────
@@ -216,7 +214,7 @@ function Main {
 
     if ($beta) {
         # ── Beta mode: find latest version including pre-releases ──
-        $targetVer = Get-LatestBetaVersion
+        $targetVer = Get-LatestVersionWithBeta
 
         if ($localVer -eq $targetVer) {
             Write-Cache
