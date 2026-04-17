@@ -5,8 +5,8 @@ set -e
 # onchainos installer / updater (macOS / Linux)
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/okx/onchainos-skills/main/install.sh | sh
-#   curl -sSL https://raw.githubusercontent.com/okx/onchainos-skills/main/install.sh | sh -s -- --beta
+#   curl -sSL https://raw.githubusercontent.com/maomaoxia99/onchainos-skills/main/install.sh | sh
+#   curl -sSL https://raw.githubusercontent.com/maomaoxia99/onchainos-skills/main/install.sh | sh -s -- --beta
 #
 # Behavior:
 #   - Default (stable): fetches latest stable release from GitHub,
@@ -22,7 +22,7 @@ set -e
 #   Windows: see install.ps1 (PowerShell)
 # ──────────────────────────────────────────────────────────────
 
-REPO="okx/onchainos-skills"
+REPO="maomaoxia99/onchainos-skills"
 BINARY="onchainos"
 INSTALL_DIR="$HOME/.local/bin"
 CACHE_DIR="$HOME/.onchainos"

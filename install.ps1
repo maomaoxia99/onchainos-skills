@@ -2,12 +2,12 @@
 # onchainos installer / updater (Windows)
 #
 # Usage (stable):
-#   irm https://raw.githubusercontent.com/okx/onchainos-skills/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/maomaoxia99/onchainos-skills/main/install.ps1 | iex
 #
 # Usage (beta):
-#   $env:ONCHAINOS_BETA=1; irm https://raw.githubusercontent.com/okx/onchainos-skills/main/install.ps1 | iex
+#   $env:ONCHAINOS_BETA=1; irm https://raw.githubusercontent.com/maomaoxia99/onchainos-skills/main/install.ps1 | iex
 #   # or
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/okx/onchainos-skills/main/install.ps1))) --beta
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/maomaoxia99/onchainos-skills/main/install.ps1))) --beta
 #
 # Behavior:
 #   - Default (stable): fetches latest stable release from GitHub,
@@ -36,7 +36,7 @@ if ($env:ONCHAINOS_BETA) {
     $beta = [switch]::new($true)
 }
 
-$REPO = "okx/onchainos-skills"
+$REPO = "maomaoxia99/onchainos-skills"
 $BINARY = "onchainos"
 $INSTALL_DIR = Join-Path $env:USERPROFILE ".local\bin"
 $CACHE_DIR = Join-Path $env:USERPROFILE ".onchainos"
