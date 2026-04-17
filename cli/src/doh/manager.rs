@@ -9,7 +9,7 @@ pub struct DohManager {
     mode: Option<DohMode>,
     node: Option<DohNode>,
     /// Resolved IP for the current node. Needed when node.ip is a CNAME domain
-    /// instead of an IP address -- we DNS-resolve it once and cache the result.
+    /// instead of an IP address — we DNS-resolve it once and cache the result.
     resolved_ip: Option<IpAddr>,
     resolved: bool,
     retried: bool,
@@ -88,9 +88,7 @@ impl DohManager {
         }
 
         // Ensure binary exists (download if needed)
-        let bin_exists = binary::binary_path()
-            .map(|p| p.exists())
-            .unwrap_or(false);
+        let bin_exists = binary::binary_path().map(|p| p.exists()).unwrap_or(false);
         if !bin_exists && binary::download_binary().await.is_err() {
             self.retried = true;
             return false;
@@ -98,9 +96,7 @@ impl DohManager {
 
         // Call exec_doh_binary with domain + exclude list + user-agent
         let ua = self.doh_user_agent();
-        if let Some(new_node) =
-            binary::exec_doh_binary(&self.domain, &exclude, Some(&ua)).await
-        {
+        if let Some(new_node) = binary::exec_doh_binary(&self.domain, &exclude, Some(&ua)).await {
             let failed_nodes = cache::read_cache(&self.domain)
                 .map(|e| e.failed_nodes)
                 .unwrap_or_default();
@@ -121,7 +117,7 @@ impl DohManager {
                 return true;
             }
 
-            // Proxy node -- cache and apply
+            // Proxy node — cache and apply
             let entry = DohCacheEntry {
                 mode: DohMode::Proxy,
                 node: Some(new_node.clone()),
@@ -132,7 +128,7 @@ impl DohManager {
 
             self.resolved_ip = Self::resolve_node_ip(&new_node.ip);
             if self.resolved_ip.is_none() {
-                // CNAME DNS resolution failed -- fall back to direct
+                // CNAME DNS resolution failed — fall back to direct
                 self.retried = true;
                 self.mode = None;
                 self.node = None;
@@ -144,7 +140,7 @@ impl DohManager {
             self.retried = false;
             true
         } else {
-            // All nodes exhausted -- clear proxy state, let caller retry with direct.
+            // All nodes exhausted — clear proxy state, let caller retry with direct.
             // Don't write cache (avoid failedNodes deadloop per spec).
             // retried stays true so this is the last attempt.
             self.retried = true;
@@ -196,27 +192,27 @@ impl DohManager {
     }
 
     /// Resolve node.ip to an IpAddr. Handles two cases:
-    /// 1. node.ip is a real IP like "8.212.1.102" -- parse directly
-    /// 2. node.ip is a CNAME domain like "xyz.aliyunddos.com" -- DNS lookup
+    /// 1. node.ip is a real IP like "8.212.1.102" → parse directly
+    /// 2. node.ip is a CNAME domain like "xyz.aliyunddos.com" → DNS lookup
     fn resolve_node_ip(ip_or_domain: &str) -> Option<IpAddr> {
         // Try direct IP parse first
         if let Ok(ip) = ip_or_domain.parse::<IpAddr>() {
             return Some(ip);
         }
-        // CNAME domain -- do blocking DNS lookup (only happens once per node switch)
+        // CNAME domain — do blocking DNS lookup (only happens once per node switch)
         use std::net::ToSocketAddrs;
         let addr = format!("{}:443", ip_or_domain);
         match addr.to_socket_addrs() {
             Ok(mut addrs) => addrs.next().map(|a| a.ip()),
             Err(_) => {
-                eprintln!("[doh] proxy node {} unavailable, falling back to direct connection", ip_or_domain);
+                eprintln!("[doh] proxy node {ip_or_domain} unavailable, falling back to direct connection");
                 None
             }
         }
     }
 
     /// Returns the User-Agent string for DoH operations.
-    /// Always returns the UA regardless of current mode -- the binary and proxy
+    /// Always returns the UA regardless of current mode — the binary and proxy
     /// nodes both need it.
     pub fn doh_user_agent(&self) -> String {
         format!("OKX/@okx_ai/onchainos-cli/{}", env!("CARGO_PKG_VERSION"))
@@ -323,6 +319,7 @@ mod tests {
     #[test]
     fn custom_base_url_skips_everything() {
         let mgr_custom = DohManager::new("web3.okx.com", "https://custom.example.com", true);
+        // prepare does nothing when custom_base_url is true
         let mut mgr = mgr_custom;
         mgr.prepare();
         assert!(!mgr.resolved);

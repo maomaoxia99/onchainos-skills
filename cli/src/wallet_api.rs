@@ -264,8 +264,7 @@ impl WalletApiClient {
     }
 
     fn rebuild_http_client(&mut self) -> Result<()> {
-        let mut builder = Client::builder()
-            .timeout(std::time::Duration::from_secs(30));
+        let mut builder = Client::builder().timeout(std::time::Duration::from_secs(30));
         if let Some((host, addr)) = self.doh.resolve_override() {
             builder = builder.resolve(&host, addr);
         }
@@ -277,13 +276,15 @@ impl WalletApiClient {
     }
 
     fn effective_base_url(&self) -> String {
-        self.doh.proxy_base_url()
+        self.doh
+            .proxy_base_url()
             .unwrap_or_else(|| self.base_url.clone())
     }
 
     // ── Low-level POST helpers ──────────────────────────────────────
 
-    /// POST without Authorization header (for init / verify / refresh). Retries after DoH failover.
+    /// POST without Authorization header (for init / verify / refresh).
+    /// Retries once after DoH failover.
     pub fn post_public<'a>(
         &'a mut self,
         path: &'a str,
@@ -291,7 +292,7 @@ impl WalletApiClient {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
         Box::pin(async move {
             let effective = self.effective_base_url();
-            let url = format!("{}{}", effective, path);
+            let url = format!("{}{}", effective.trim_end_matches('/'), path);
 
             if cfg!(feature = "debug-log") {
                 eprintln!("[DEBUG][post_public] url_path={}", &url);
@@ -311,9 +312,10 @@ impl WalletApiClient {
                         self.rebuild_http_client()?;
                         return self.post_public(path, body).await;
                     }
-                    return Err(e).context("Network unavailable — check your connection and try again");
+                    return Err(e)
+                        .context("Network unavailable — check your connection and try again");
                 }
-                Err(e) => return Err(e).context("wallet API request failed"),
+                Err(e) => return Err(e).context("request failed"),
             };
             self.doh.cache_direct_if_needed();
             self.handle_response(resp).await
@@ -321,12 +323,19 @@ impl WalletApiClient {
     }
 
     /// POST with Bearer accessToken (for create / list / refresh / x402).
-    pub async fn post_authed(&mut self, path: &str, access_token: &str, body: &Value) -> Result<Value> {
+    /// Retries once after DoH failover.
+    pub async fn post_authed(
+        &mut self,
+        path: &str,
+        access_token: &str,
+        body: &Value,
+    ) -> Result<Value> {
         self.post_authed_with_headers(path, access_token, body, None)
             .await
     }
 
-    /// POST with Bearer accessToken + optional extra headers. Retries after DoH failover.
+    /// POST with Bearer accessToken + optional extra headers.
+    /// Retries once after DoH failover.
     pub fn post_authed_with_headers<'a>(
         &'a mut self,
         path: &'a str,
@@ -336,7 +345,7 @@ impl WalletApiClient {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
         Box::pin(async move {
             let effective = self.effective_base_url();
-            let url = format!("{}{}", effective, path);
+            let url = format!("{}{}", effective.trim_end_matches('/'), path);
 
             if cfg!(feature = "debug-log") {
                 eprintln!("[DEBUG][post_authed] url_path={}", &url);
@@ -366,18 +375,21 @@ impl WalletApiClient {
                 Err(e) if e.is_connect() || e.is_timeout() => {
                     if self.doh.handle_failure().await {
                         self.rebuild_http_client()?;
-                        return self.post_authed_with_headers(path, access_token, body, extra_headers).await;
+                        return self
+                            .post_authed_with_headers(path, access_token, body, extra_headers)
+                            .await;
                     }
-                    return Err(e).context("Network unavailable — check your connection and try again");
+                    return Err(e)
+                        .context("Network unavailable — check your connection and try again");
                 }
-                Err(e) => return Err(e).context("wallet API request failed"),
+                Err(e) => return Err(e).context("request failed"),
             };
             self.doh.cache_direct_if_needed();
             self.handle_response(resp).await
         })
     }
 
-    /// POST with Bearer accessToken + optional extra headers. No DoH retry — for broadcast-transaction only.
+    /// POST with Bearer accessToken — no DoH retry. Use only for broadcast-transaction.
     async fn post_authed_no_retry_with_headers(
         &mut self,
         path: &str,
@@ -386,7 +398,7 @@ impl WalletApiClient {
         extra_headers: Option<&[(&str, &str)]>,
     ) -> Result<Value> {
         let effective = self.effective_base_url();
-        let url = format!("{}{}", effective, path);
+        let url = format!("{}{}", effective.trim_end_matches('/'), path);
 
         if cfg!(feature = "debug-log") {
             eprintln!("[DEBUG][post_authed_no_retry] url_path={}", &url);
@@ -420,7 +432,7 @@ impl WalletApiClient {
                 }
                 return Err(e).context("Network error during broadcast — transaction was NOT sent. Safe to retry the same command.");
             }
-            Err(e) => return Err(e).context("wallet API request failed"),
+            Err(e) => return Err(e).context("request failed"),
         };
         self.doh.cache_direct_if_needed();
         self.handle_response(resp).await
@@ -470,7 +482,12 @@ impl WalletApiClient {
         Box::pin(async move {
             let query_string = build_query_string(query);
             let effective = self.effective_base_url();
-            let url = format!("{}{}{}", effective, path, query_string);
+            let url = format!(
+                "{}{}{}",
+                effective.trim_end_matches('/'),
+                path,
+                query_string
+            );
             let resp = match self
                 .http
                 .get(&url)
@@ -484,9 +501,10 @@ impl WalletApiClient {
                         self.rebuild_http_client()?;
                         return self.get_authed(path, access_token, query).await;
                     }
-                    return Err(e).context("Network unavailable — check your connection and try again");
+                    return Err(e)
+                        .context("Network unavailable — check your connection and try again");
                 }
-                Err(e) => return Err(e).context("wallet API request failed"),
+                Err(e) => return Err(e).context("request failed"),
             };
             self.doh.cache_direct_if_needed();
             self.handle_response(resp).await

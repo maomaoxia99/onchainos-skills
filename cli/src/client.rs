@@ -373,8 +373,7 @@ impl ApiClient {
     }
 
     fn rebuild_http_client(&mut self) -> Result<()> {
-        let mut builder = Client::builder()
-            .timeout(std::time::Duration::from_secs(10));
+        let mut builder = Client::builder().timeout(std::time::Duration::from_secs(10));
         if let Some((host, addr)) = self.doh.resolve_override() {
             builder = builder.resolve(&host, addr);
         }
@@ -386,7 +385,8 @@ impl ApiClient {
     }
 
     fn effective_base_url(&self) -> String {
-        self.doh.proxy_base_url()
+        self.doh
+            .proxy_base_url()
             .unwrap_or_else(|| self.base_url.clone())
     }
 
@@ -402,8 +402,7 @@ impl ApiClient {
             .collect();
 
         let effective = self.effective_base_url();
-        let mut url =
-            reqwest::Url::parse(&format!("{}{}", effective.trim_end_matches('/'), path))?;
+        let mut url = reqwest::Url::parse(&format!("{}{}", effective.trim_end_matches('/'), path))?;
 
         if !filtered.is_empty() {
             url.query_pairs_mut().extend_pairs(filtered.iter().copied());
@@ -413,6 +412,7 @@ impl ApiClient {
             .query()
             .map(|query| format!("?{}", query))
             .unwrap_or_default();
+        // request_path uses original path (no proxy host) — used for HMAC signing
         let request_path = format!("{}{}", path, query_string);
 
         Ok((url, request_path))
@@ -454,9 +454,11 @@ impl ApiClient {
                 Err(e) if e.is_connect() || e.is_timeout() => {
                     if self.doh.handle_failure().await {
                         self.rebuild_http_client()?;
+                        // Rebuild the entire request with potentially new URL
                         return self.get_with_headers(path, query, extra_headers).await;
                     }
-                    return Err(e).context("Network unavailable — check your connection and try again");
+                    return Err(e)
+                        .context("Network unavailable — check your connection and try again");
                 }
                 Err(e) => return Err(e).context("request failed"),
             };
@@ -466,10 +468,12 @@ impl ApiClient {
     }
 
     /// POST request with automatic auth (JWT or AK). Retries after DoH failover.
+    /// Signature uses path only (no query string) + JSON body string.
     pub async fn post(&mut self, path: &str, body: &Value) -> Result<Value> {
         self.post_with_headers(path, body, None).await
     }
 
+    /// POST request with automatic auth + optional extra headers.
     /// Retries once after DoH failover (safe for idempotent endpoints).
     pub fn post_with_headers<'a>(
         &'a mut self,
@@ -505,7 +509,8 @@ impl ApiClient {
                         self.rebuild_http_client()?;
                         return self.post_with_headers(path, body, extra_headers).await;
                     }
-                    return Err(e).context("Network unavailable — check your connection and try again");
+                    return Err(e)
+                        .context("Network unavailable — check your connection and try again");
                 }
                 Err(e) => return Err(e).context("request failed"),
             };

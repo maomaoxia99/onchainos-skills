@@ -8,6 +8,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
 use crate::client::ApiClient;
 use crate::commands::{
     defi, gateway, leaderboard, market, memepump, portfolio, signal, swap, token, tracker,
@@ -253,6 +256,10 @@ struct TokenSearchParams {
     query: String,
     /// Comma-separated chain names, e.g. "ethereum,solana" (optional, searches all)
     chains: Option<String>,
+    /// Number of results per page (default: 20, max: 100). Use cursor for pagination.
+    limit: Option<String>,
+    /// Pagination cursor. Pass the cursor value from the last item of the previous response to fetch the next page. Omit for first page.
+    cursor: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -314,6 +321,10 @@ struct TokenTagAddressParams {
     chain: Option<String>,
     /// Filter by tag: 1=KOL, 2=Developer, 3=Smart Money, 4=Whale, 5=Fresh Wallet, 6=Insider, 7=Sniper, 8=Suspicious Phishing, 9=Bundler
     tag_filter: Option<u8>,
+    /// Number of results per page (default: 20, max: 100). Use cursor for pagination.
+    limit: Option<String>,
+    /// Pagination cursor. Pass the cursor value from the last item of the previous response to fetch the next page. Omit for first page.
+    cursor: Option<String>,
 }
 
 // ── Memepump ──────────────────────────────────────────────────────────
@@ -404,6 +415,10 @@ struct MarketSignalListParams {
     min_liquidity_usd: Option<String>,
     /// Max token liquidity in USD (optional)
     max_liquidity_usd: Option<String>,
+    /// Number of results per page (default: 20, max: 100). Use cursor for pagination.
+    limit: Option<String>,
+    /// Pagination cursor. Pass the cursor value from the last item of the previous response to fetch the next page. Omit for first page.
+    cursor: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -465,7 +480,7 @@ struct SwapSwapParams {
     gas_level: Option<String>,
     /// Swap mode: exactIn (default) or exactOut
     swap_mode: Option<String>,
-    /// Jito tips in SOL for Solana MEV protection (range: 0.0000000001–2)
+    /// Jito tips in lamports for Solana MEV protection (positive integer, e.g. `1000` = 0.000001 SOL)
     tips: Option<String>,
     /// Max auto slippage percent cap when autoSlippage is enabled (e.g. "0.5")
     max_auto_slippage: Option<String>,
@@ -624,24 +639,17 @@ struct GatewayOrdersParams {
     order_id: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct McpServer {
     tool_router: ToolRouter<Self>,
-    client: tokio::sync::Mutex<ApiClient>,
-}
-
-impl Clone for McpServer {
-    fn clone(&self) -> Self {
-        // ToolRouter is re-created; client Arc is cloned.
-        // This is only called once by rmcp during setup.
-        panic!("McpServer should not be cloned after construction")
-    }
+    client: Arc<Mutex<ApiClient>>,
 }
 
 impl McpServer {
     pub fn new(base_url_override: Option<&str>) -> Result<Self> {
         Ok(Self {
             tool_router: Self::tool_router(),
-            client: tokio::sync::Mutex::new(ApiClient::new(base_url_override)?),
+            client: Arc::new(Mutex::new(ApiClient::new(base_url_override)?)),
         })
     }
 }
@@ -672,7 +680,7 @@ fn err(e: anyhow::Error) -> Result<String, String> {
 impl McpServer {
     #[tool(
         name = "token_search",
-        description = "Search tokens by name/symbol/address across chains"
+        description = "Search tokens by name/symbol/address across chains. Default limit is 20 to prevent token overflow. Use cursor for pagination."
     )]
     async fn token_search(
         &self,
@@ -680,7 +688,15 @@ impl McpServer {
     ) -> Result<String, String> {
         let mut client = self.client.lock().await;
         let chains = p.chains.as_deref().unwrap_or("1,501");
-        match token::fetch_search(&mut client, &p.query, chains).await {
+        match token::fetch_search(
+            &mut client,
+            &p.query,
+            chains,
+            p.limit.as_deref(),
+            p.cursor.as_deref(),
+        )
+        .await
+        {
             Ok(data) => ok(data),
             Err(e) => err(e),
         }
@@ -708,7 +724,7 @@ impl McpServer {
 
     #[tool(
         name = "token_holders",
-        description = "Get token holder distribution (top 20)"
+        description = "Get token holder distribution. Default limit is 20 to prevent token overflow. Use cursor for pagination."
     )]
     async fn token_holders(
         &self,
@@ -720,21 +736,13 @@ impl McpServer {
             .as_deref()
             .map(crate::chains::resolve_chain)
             .unwrap_or_else(|| crate::chains::resolve_chain("ethereum").to_string());
-        match token::fetch_holders(&mut client, &p.address, &chain_index, p.tag_filter).await {
-            Ok(data) => ok(data),
-            Err(e) => err(e),
-        }
-    }
-
-    #[tool(name = "token_trending", description = "Get trending token rankings")]
-    async fn token_trending(&self) -> Result<String, String> {
-        let mut client = self.client.lock().await;
-        match token::fetch_hot_tokens(
+        match token::fetch_holders(
             &mut client,
-            token::HotTokensParams {
-                ranking_type: "4".to_string(),
-                ..Default::default()
-            },
+            &p.address,
+            &chain_index,
+            p.tag_filter,
+            p.limit.as_deref(),
+            p.cursor.as_deref(),
         )
         .await
         {
@@ -889,7 +897,7 @@ impl McpServer {
 
     #[tool(
         name = "signal_list",
-        description = "Get smart money / KOL / whale signal list for a chain"
+        description = "Get smart money / KOL / whale signal list for a chain. Default limit is 20 to prevent token overflow. Use cursor for pagination."
     )]
     async fn signal_list(
         &self,
@@ -910,6 +918,8 @@ impl McpServer {
             p.max_market_cap_usd,
             p.min_liquidity_usd,
             p.max_liquidity_usd,
+            p.limit,
+            p.cursor,
         )
         .await
         {
@@ -1391,7 +1401,7 @@ impl McpServer {
 
     #[tool(
         name = "token_hot_tokens",
-        description = "Get hot token list ranked by trending score or X mentions, with extensive filtering"
+        description = "Get hot token list ranked by trending score or X mentions, with extensive filtering. Default limit is 20 to prevent token overflow. Use cursor for pagination."
     )]
     async fn token_hot_tokens(
         &self,
@@ -1426,7 +1436,7 @@ impl McpServer {
 
     #[tool(
         name = "token_top_trader",
-        description = "Get top traders (profit addresses) for a token"
+        description = "Get top traders (profit addresses) for a token. Default limit is 20 to prevent token overflow. Use cursor for pagination."
     )]
     async fn token_top_trader(
         &self,
@@ -1438,7 +1448,16 @@ impl McpServer {
             .as_deref()
             .map(crate::chains::resolve_chain)
             .unwrap_or_else(|| crate::chains::resolve_chain("ethereum").to_string());
-        match token::fetch_top_trader(&mut client, &p.address, &chain_index, p.tag_filter).await {
+        match token::fetch_top_trader(
+            &mut client,
+            &p.address,
+            &chain_index,
+            p.tag_filter,
+            p.limit.as_deref(),
+            p.cursor.as_deref(),
+        )
+        .await
+        {
             Ok(data) => ok(data),
             Err(e) => err(e),
         }
@@ -1821,8 +1840,7 @@ impl McpServer {
         Parameters(p): Parameters<DefiRateChartParams>,
     ) -> Result<String, String> {
         let mut client = self.client.lock().await;
-        match defi::fetch_rate_chart(&mut client, &p.investment_id, p.time_range.as_deref()).await
-        {
+        match defi::fetch_rate_chart(&mut client, &p.investment_id, p.time_range.as_deref()).await {
             Ok(data) => ok(data),
             Err(e) => err(e),
         }

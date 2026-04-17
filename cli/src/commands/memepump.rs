@@ -683,7 +683,9 @@ async fn memepump_token_details(
         .unwrap_or_else(|| ctx.chain_index_or("solana"));
     let wallet_address = wallet.unwrap_or_default();
     let mut client = ctx.client_async().await?;
-    output::success(fetch_token_details(&mut client, address, &chain_index, &wallet_address).await?);
+    output::success(
+        fetch_token_details(&mut client, address, &chain_index, &wallet_address).await?,
+    );
     Ok(())
 }
 
