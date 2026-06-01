@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::output;
 
-const REPO: &str = "okx/onchainos-skills";
+const REPO: &str = "maomaoxia99/onchainos-skills";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(clap::Args)]

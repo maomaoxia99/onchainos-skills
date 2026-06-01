@@ -46,9 +46,7 @@ yarn-error.log*
 # Claude Code
 **/settings.local.json
 .mcp.json
-
-# Superpowers generated docs (local only)
-docs/superpowers/
+CLAUDE.local.md
 
 # AI Assistant directories (auto-generated)
 .cursor
@@ -57,8 +55,18 @@ docs/superpowers/
 .cursorignore
 .claude
 
+# Superpowers generated docs (local only)
+docs/superpowers/
+
+reports
 
 .zigbuild-cache/
+
+# Oli / fe-sdd-to-a pipeline artifacts (per-run docs; never committed)
+oli-docs/
+.wiki-to-oli-launch.sh
+onboard.md
+docs/agent
 
 # Test artifacts (local only)
 results/

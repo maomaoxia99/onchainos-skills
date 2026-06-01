@@ -4,7 +4,7 @@ description: "Use this skill when the user provides a specific wallet address an
 license: MIT
 metadata:
   author: okx
-  version: "2.2.9"
+  version: "3.3.8"
   homepage: "https://web3.okx.com"
 ---
 
@@ -22,7 +22,7 @@ Every time before running any `onchainos` command, always follow these steps in 
    ```
    Extract the `tag_name` field (e.g., `v1.0.5`) into `LATEST_TAG`.
    If the API call fails and `onchainos` is already installed locally, skip steps 2-3
-   and proceed to run the command (the user may be offline or rate-limited; a stale
+   and continue with step 4 (the user may be offline or rate-limited; a stale
    binary is better than blocking). If `onchainos` is **not** installed, **stop** and
    tell the user to check their network connection or install manually from
    https://github.com/okx/onchainos-skills.
@@ -49,9 +49,11 @@ Every time before running any `onchainos` command, always follow these steps in 
    - Platform targets — macOS: `arm64`->`aarch64-apple-darwin`, `x86_64`->`x86_64-apple-darwin`; Linux: `x86_64`->`x86_64-unknown-linux-gnu`, `aarch64`->`aarch64-unknown-linux-gnu`, `i686`->`i686-unknown-linux-gnu`, `armv7l`->`armv7-unknown-linux-gnueabihf`; Windows: `AMD64`->`x86_64-pc-windows-msvc`, `x86`->`i686-pc-windows-msvc`, `ARM64`->`aarch64-pc-windows-msvc`
    - Hash command — macOS/Linux: `shasum -a 256 ~/.local/bin/onchainos`; Windows: `(Get-FileHash "$env:USERPROFILE\.local\bin\onchainos.exe" -Algorithm SHA256).Hash.ToLower()`
 
-4. **Check for skill version drift** (once per session): If `onchainos --version` is newer
-   than the `version` field under `metadata:` in this file's YAML frontmatter (e.g., `version: "2.0.0"` between the `---` markers at the top), display a one-time notice that the skill may be
-   outdated and suggest the user re-install skills via their platform's method. Do not block.
+4. **Version drift check** — REQUIRED, run even if steps 1-3 were skipped.
+   - Run `onchainos --version` → CLI version (e.g., `2.2.9`)
+   - Read `version` field from this file's YAML frontmatter (e.g., `version: "2.0.0"` at the top)
+   - If CLI version > skill version → warn: **"⚠️ Skill outdated (skill vX.Y.Z < CLI vA.B.C). Re-install skills to get the latest features and fixes."**
+   - Continue to the user's command.
 5. **Do NOT auto-reinstall on command failures.** Report errors and suggest
    `onchainos --version` or manual reinstall from https://github.com/okx/onchainos-skills.
 6. **Rate limit errors.** If a command hits rate limits, the shared API key may
@@ -108,6 +110,18 @@ The CLI accepts human-readable chain names and resolves them automatically.
 | 2 | `onchainos portfolio total-value --address <address> --chains <chains>` | Get total asset value for a wallet (both params required) |
 | 3 | `onchainos portfolio all-balances --address <address> --chains <chains>` | Get all token balances for a wallet (both params required) |
 | 4 | `onchainos portfolio token-balances --address ... --tokens ...` | Get specific token balances |
+
+## Related Workflows
+
+When one of the following commands is used, show the related workflow hint after displaying results:
+
+| Command | Workflow | File |
+|---------|----------|------|
+| `portfolio all-balances` | Daily Brief | `~/.onchainos/workflows/daily-brief.md` |
+| `portfolio all-balances`, `portfolio total-value` | Portfolio Check | `~/.onchainos/workflows/portfolio-check.md` |
+| `portfolio all-balances` | Wallet Analysis | `~/.onchainos/workflows/wallet-analysis.md` |
+
+> Hint format: *"You can also try out our **[workflow name]** workflow for more comprehensive results. Would you like to try it?"*
 
 ## Cross-Skill Workflows
 

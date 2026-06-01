@@ -12,9 +12,20 @@ mod home;
 mod keyring_store;
 mod mcp;
 mod output;
+mod payment_cache;
+mod payment_notify;
+mod permit2_eip712;
+mod permit2_rpc;
+mod permit2_sign;
+mod permit2_types;
+pub mod token_alias;
+pub mod validators;
 mod wallet_api;
 mod wallet_store;
 mod watch;
+
+#[cfg(test)]
+mod test_helpers;
 
 use clap::{Parser, Subcommand};
 
@@ -49,6 +60,11 @@ pub enum Commands {
         #[command(subcommand)]
         command: commands::signal::SignalCommand,
     },
+    /// Social signals: crypto news, market sentiment, vibe / KOL chatter
+    Social {
+        #[command(subcommand)]
+        command: commands::social::SocialCommand,
+    },
     /// Meme / pump.fun token scanning and analysis
     Memepump {
         #[command(subcommand)]
@@ -68,6 +84,12 @@ pub enum Commands {
     Swap {
         #[command(subcommand)]
         command: commands::swap::SwapCommand,
+    },
+    /// Cross-chain bridge swap
+    #[command(name = "cross-chain")]
+    CrossChain {
+        #[command(subcommand)]
+        command: commands::cross_chain::CrossChainCommand,
     },
     /// On-chain gateway
     Gateway {
@@ -95,10 +117,15 @@ pub enum Commands {
         #[command(subcommand)]
         command: commands::security::SecurityCommand,
     },
-    /// Payment protocols — auto-pay gated APIs (x402, etc.)
+    /// Payment protocols — auto-pay gated APIs and agent-to-agent payment links
     Payment {
         #[command(subcommand)]
-        command: commands::agentic_wallet::payment::PaymentCommand,
+        command: commands::payment::PaymentCommand,
+    },
+    /// Trading competition: list, join, rank, claim rewards (Agentic Wallet exclusive)
+    Competition {
+        #[command(subcommand)]
+        command: commands::competition::CompetitionCommand,
     },
     /// Address tracker: REST activities for KOL / smart money / custom address activity
     Tracker {
@@ -115,6 +142,17 @@ pub enum Commands {
         #[command(subcommand)]
         command: commands::defi::DefiCommand,
     },
+    /// Limit-order strategy trading on Agentic Wallet (create-limit / cancel / list / resume)
+    Strategy {
+        #[command(subcommand)]
+        command: Box<commands::strategy::StrategyCommand>,
+    },
+    /// Multi-step workflow commands that chain API calls for complete operations
+    Workflow {
+        #[command(subcommand)]
+        command: Box<commands::workflows::WorkflowCommand>,
+    },
+
     /// Upgrade onchainos to the latest version
     Upgrade(commands::upgrade::UpgradeArgs),
 }
@@ -137,6 +175,11 @@ async fn run() {
 
     let cli = Cli::parse();
 
+    // Propagate --base-url to env so WalletApiClient and refresh_jwt_inline pick it up.
+    if let Some(ref url) = cli.base_url {
+        std::env::set_var("OKX_BASE_URL", url);
+    }
+
     // MCP server runs indefinitely — skip audit for it (MCP tools log individually).
     if matches!(cli.command, Commands::Mcp { .. }) {
         if let Commands::Mcp { base_url } = cli.command {
@@ -158,19 +201,24 @@ async fn run() {
     let result = match cli.command {
         Commands::Market { command } => commands::market::execute(&ctx, *command).await,
         Commands::Signal { command } => commands::signal::execute(&ctx, command).await,
+        Commands::Social { command } => commands::social::execute(&ctx, command).await,
         Commands::Memepump { command } => commands::memepump::execute(&ctx, *command).await,
         Commands::Leaderboard { command } => commands::leaderboard::execute(&ctx, command).await,
         Commands::Tracker { command } => commands::tracker::execute(&ctx, command).await,
         Commands::Token { command } => commands::token::execute(&ctx, *command).await,
         Commands::Swap { command } => commands::swap::execute(&ctx, command).await,
+        Commands::CrossChain { command } => commands::cross_chain::execute(&ctx, command).await,
         Commands::Gateway { command } => commands::gateway::execute(&ctx, command).await,
         Commands::Portfolio { command } => commands::portfolio::execute(&ctx, command).await,
         Commands::Mcp { .. } => unreachable!("handled above"),
         Commands::Wallet { command } => commands::agentic_wallet::wallet::execute(command).await,
         Commands::Security { command } => commands::security::execute(&ctx, command).await,
-        Commands::Payment { command } => commands::agentic_wallet::payment::execute(command).await,
+        Commands::Payment { command } => commands::payment::execute(command).await,
+        Commands::Competition { command } => commands::competition::execute(&ctx, command).await,
         Commands::Defi { command } => commands::defi::execute(&ctx, command).await,
+        Commands::Strategy { command } => commands::strategy::execute(&ctx, *command).await,
         Commands::Ws { command } => commands::ws::execute(command).await,
+        Commands::Workflow { command } => commands::workflows::execute(&ctx, *command).await,
         Commands::Upgrade(args) => commands::upgrade::execute(args).await,
     };
 
@@ -190,10 +238,16 @@ async fn run() {
                 output::confirming(&c.message, &c.next);
                 std::process::exit(2);
             }
-            Err(e) => {
-                output::error(&format!("{e:#}"));
-                std::process::exit(1);
-            }
+            Err(e) => match e.downcast::<output::CliSetupRequired>() {
+                Ok(s) => {
+                    output::setup_required(&s.error_code, &s.message, &s.data);
+                    std::process::exit(3);
+                }
+                Err(e) => {
+                    output::error(&format!("{e:#}"));
+                    std::process::exit(1);
+                }
+            },
         }
     }
 }
