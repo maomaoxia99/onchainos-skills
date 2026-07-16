@@ -190,11 +190,14 @@ jobs:
           Copy-Item "${env:CARGO_DIR}\target\${env:TARGET}\release\${env:BIN_NAME}.exe" `
                     "${env:BIN_NAME}-${env:TARGET}.exe"
 
-      # ── Windows code signing with jsign + DigiCert ONE ──
-      - name: "Setup DigiCert certificate"
+      # ── Windows code signing with DigiCert Software Trust Manager (smctl) ──
+      # jsign's DIGICERTONE storetype is broken against DigiCert's current API
+      # (duplicate-slash bug — ebourg/jsign#353, fix merged but unreleased), so
+      # we sign with DigiCert's official simple-signing action instead. Simple
+      # signing uses smctl directly — no jsign, no PKCS11/KSP library needed.
+      - name: "Setup DigiCert client certificate"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
         env:
-          SM_API_KEY: ${{ secrets.SM_API_KEY }}
           SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
         shell: pwsh
         run: |
@@ -203,59 +206,50 @@ jobs:
           Write-Host "Certificate file size: $((Get-Item $certPath).Length) bytes"
           "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
 
-      - name: "Download jsign"
+      - name: "Setup Software Trust Manager tools (smctl)"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/ebourg/jsign/releases/download/7.4/jsign-7.4.jar" `
-            -OutFile "${{ runner.temp }}\jsign.jar"
+        uses: digicert/code-signing-software-trust-action@fae23a455ba4bde62b64fd7cb2f81ade788f5a95 # v1.2.1
+        with:
+          simple-signing-mode: true
+        env:
+          SM_HOST: ${{ env.SM_HOST }}
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_FILE: ${{ env.SM_CLIENT_CERT_FILE }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
 
-      - name: "Debug DigiCert reachability"
+      - name: "Healthcheck + list keypairs (read keypair-alias from this log)"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
+        continue-on-error: true
         shell: pwsh
         env:
+          SM_HOST: ${{ env.SM_HOST }}
           SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_FILE: ${{ env.SM_CLIENT_CERT_FILE }}
           SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-          SM_CERTIFICATE_ID: ${{ secrets.SM_CERTIFICATE_ID }}
         run: |
-          # Probe the DigiCert ONE certificate endpoint the same way jsign does
-          # (Java/.NET TLS stack, NOT Windows curl+schannel — schannel cannot
-          # load a .p12 as a client cert and yields a false SEC_E_INTERNAL_ERROR).
-          # Only the HTTP status code is printed; the response body (which may
-          # hold sensitive data) is never shown.
-          $ErrorActionPreference = "Stop"
-          $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
-            $env:SM_CLIENT_CERT_FILE, $env:SM_CLIENT_CERT_PASSWORD)
-          Write-Host "Client cert loaded: subject present = $([bool]$cert.Subject)"
-          $uri = "https://clientauth.one.digicert.com/signingmanager/api/v1/certificates/$env:SM_CERTIFICATE_ID"
-          try {
-            $resp = Invoke-WebRequest -Uri $uri -Method GET `
-              -Certificate $cert `
-              -Headers @{ "x-api-key" = $env:SM_API_KEY } `
-              -SkipHttpErrorCheck
-            Write-Host "HTTP status: $($resp.StatusCode)"
-            Write-Host "Content-Type: $($resp.Headers['Content-Type'])"
-          } catch {
-            Write-Host "Request error: $($_.Exception.Message)"
-          }
-          Write-Host "== 200=OK, 401/403=perms, 3xx=host/region, 5xx=gateway =="
+          smctl healthcheck
+          Write-Host "== Keypairs (copy the alias into repo variable SM_KEYPAIR_ALIAS) =="
+          smctl keypair list
 
-      - name: "Sign Windows binary (DigiCert ONE via jsign)"
-        if: runner.os == 'Windows' && env.SM_API_KEY != ''
-        shell: pwsh
+      - name: "Sign Windows binary (DigiCert simple signing)"
+        if: runner.os == 'Windows' && env.SM_API_KEY != '' && vars.SM_KEYPAIR_ALIAS != ''
+        uses: digicert/code-signing-software-trust-action@fae23a455ba4bde62b64fd7cb2f81ade788f5a95 # v1.2.1
+        with:
+          simple-signing-mode: true
+          input: ${{ env.BIN_NAME }}-${{ matrix.target }}.exe
+          keypair-alias: ${{ vars.SM_KEYPAIR_ALIAS }}
+          timestamp: true
         env:
+          SM_HOST: ${{ env.SM_HOST }}
           SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_FILE: ${{ env.SM_CLIENT_CERT_FILE }}
           SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-          SM_CERTIFICATE_ID: ${{ secrets.SM_CERTIFICATE_ID }}
+
+      - name: "Warn if keypair-alias is not configured"
+        if: runner.os == 'Windows' && env.SM_API_KEY != '' && vars.SM_KEYPAIR_ALIAS == ''
+        shell: pwsh
         run: |
-          $storepass = "$env:SM_API_KEY|$env:SM_CLIENT_CERT_FILE|$env:SM_CLIENT_CERT_PASSWORD"
-          java -jar "${{ runner.temp }}\jsign.jar" `
-            --storetype DIGICERTONE `
-            --keystore "https://clientauth.one.digicert.com" `
-            --storepass $storepass `
-            --alias "$env:SM_CERTIFICATE_ID" `
-            --tsaurl "http://timestamp.digicert.com" `
-            "${{ env.BIN_NAME }}-${{ matrix.target }}.exe"
+          Write-Host "::warning::Repo variable SM_KEYPAIR_ALIAS is not set — binary was NOT signed. Read the alias from the 'list keypairs' step above, add it under Settings -> Secrets and variables -> Actions -> Variables, then re-run."
 
       - name: "Verify Windows binary signature"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
