@@ -95,6 +95,9 @@ jobs:
       contents: read
     env:
       SM_API_KEY: ${{ secrets.SM_API_KEY }}
+      # DigiCert ONE host. jsign (DIGICERTONE) and smctl both read SM_HOST.
+      # Override here if your account is in a non-default region.
+      SM_HOST: https://clientauth.one.digicert.com
     strategy:
       fail-fast: false
       matrix:
@@ -215,16 +218,27 @@ jobs:
           SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
           SM_CERTIFICATE_ID: ${{ secrets.SM_CERTIFICATE_ID }}
         run: |
-          # Probe the DigiCert ONE certificate endpoint to see what actually
-          # comes back (JSON = OK, HTML = 403/redirect/gateway error). Only the
-          # status line + response headers are printed; the body (which may hold
-          # sensitive data) is discarded.
-          Write-Host "== Probing certificate endpoint (headers only) =="
-          curl.exe -sS -o NUL -D - --cert-type P12 `
-            --cert "${env:SM_CLIENT_CERT_FILE}:${env:SM_CLIENT_CERT_PASSWORD}" `
-            -H "x-api-key: ${env:SM_API_KEY}" `
-            "https://clientauth.one.digicert.com/signingmanager/api/v1/certificates/${env:SM_CERTIFICATE_ID}"
-          Write-Host "== HTTP status above: 200=OK, 401/403=perms, 3xx=host/region, 5xx=gateway =="
+          # Probe the DigiCert ONE certificate endpoint the same way jsign does
+          # (Java/.NET TLS stack, NOT Windows curl+schannel — schannel cannot
+          # load a .p12 as a client cert and yields a false SEC_E_INTERNAL_ERROR).
+          # Only the HTTP status code is printed; the response body (which may
+          # hold sensitive data) is never shown.
+          $ErrorActionPreference = "Stop"
+          $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
+            $env:SM_CLIENT_CERT_FILE, $env:SM_CLIENT_CERT_PASSWORD)
+          Write-Host "Client cert loaded: subject present = $([bool]$cert.Subject)"
+          $uri = "https://clientauth.one.digicert.com/signingmanager/api/v1/certificates/$env:SM_CERTIFICATE_ID"
+          try {
+            $resp = Invoke-WebRequest -Uri $uri -Method GET `
+              -Certificate $cert `
+              -Headers @{ "x-api-key" = $env:SM_API_KEY } `
+              -SkipHttpErrorCheck
+            Write-Host "HTTP status: $($resp.StatusCode)"
+            Write-Host "Content-Type: $($resp.Headers['Content-Type'])"
+          } catch {
+            Write-Host "Request error: $($_.Exception.Message)"
+          }
+          Write-Host "== 200=OK, 401/403=perms, 3xx=host/region, 5xx=gateway =="
 
       - name: "Sign Windows binary (DigiCert ONE via jsign)"
         if: runner.os == 'Windows' && env.SM_API_KEY != ''
